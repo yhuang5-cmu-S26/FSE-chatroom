@@ -1,0 +1,23 @@
+{
+  "name": "fse-chatroom",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/server.js",
+  "scripts": {
+    "test": "node --test",
+    "start": "node src/server.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://localhost:26831/yhuang5-cmu-S26/FSE-chatroom"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1",
+    "mongodb": "^7.5.0",
+    "socket.io": "^4.8.3",
+    "zod": "^4.4.3"
+  }
+}
