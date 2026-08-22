@@ -1,0 +1,14 @@
+# dependencies
+frontend/node_modules/
+backend/node_modules/
+
+# build outputs
+frontend/dist/
+
+# env files
+.env
+frontend/.env
+backend/.env
+
+# logs
+*.log
