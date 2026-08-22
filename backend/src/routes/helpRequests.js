@@ -1,4 +1,5 @@
 const express = require('express');
+const mongoose = require('mongoose');
 const HelpRequest = require('../models/HelpRequest');
 
 const router = express.Router();
@@ -38,20 +39,24 @@ router.get('/', async (_req, res, next) => {
 
 router.patch('/:id/status', async (req, res, next) => {
   try {
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ error: 'invalid help request id' });
+    }
+    const requestId = new mongoose.Types.ObjectId(req.params.id);
+
     const { status } = req.body;
     if (!status || !validStatuses.has(status)) {
       return res.status(400).json({ error: 'valid status is required' });
     }
 
-    const updated = await HelpRequest.findByIdAndUpdate(
-      req.params.id,
-      { status },
-      { new: true, runValidators: true }
-    );
+    const updated = await HelpRequest.findById(requestId);
 
     if (!updated) {
       return res.status(404).json({ error: 'help request not found' });
     }
+
+    updated.status = status;
+    await updated.save();
 
     const io = req.app.locals.io;
     if (io) {

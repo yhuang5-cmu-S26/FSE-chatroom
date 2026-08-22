@@ -1,18 +1,27 @@
 const express = require('express');
 const cors = require('cors');
+const rateLimit = require('express-rate-limit');
 
 const checkinRoutes = require('./routes/checkins');
 const helpRequestRoutes = require('./routes/helpRequests');
 const locationRoutes = require('./routes/locations');
 
 const app = express();
+const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
+const apiLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  limit: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || '*',
+    origin: corsOrigin,
   })
 );
 app.use(express.json());
+app.use('/api', apiLimiter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
