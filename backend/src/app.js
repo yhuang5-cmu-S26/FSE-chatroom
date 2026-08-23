@@ -4,7 +4,9 @@ const rateLimit = require('express-rate-limit');
 
 const checkinRoutes = require('./routes/checkins');
 const helpRequestRoutes = require('./routes/helpRequests');
-const locationRoutes = require('./routes/locations');
+const userRoutes = require('./routes/users');
+const stressRoutes = require('./routes/stress');
+const authRoutes = require('./routes/auth');
 
 const app = express();
 const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
@@ -27,9 +29,11 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+app.use('/api/auth', authRoutes);
 app.use('/api/checkins', checkinRoutes);
 app.use('/api/help-requests', helpRequestRoutes);
-app.use('/api/locations', locationRoutes);
+app.use('/api/users', userRoutes);
+app.use('/api/stress', stressRoutes);
 
 app.use((req, res) => {
   res.status(404).json({ error: `route not found: ${req.method} ${req.path}` });

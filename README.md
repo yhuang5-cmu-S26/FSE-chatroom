@@ -1,37 +1,35 @@
-# ESN 应急灾害响应系统（基于实时聊天平台扩展）
+# ESN Chatroom
 
-本仓库提供一个前后端分离的初始化版本（MVP skeleton），用于后续迭代实现应急灾害响应能力。当前版本覆盖：实时通信、人员签到、求助调度、位置服务。
+轻量级应急协作系统，包含：
+- 实时群聊与私聊
+- 在线用户与会话侧栏
+- 消息 ACK、重试、离线补偿
+- JWT 认证与基础 RBAC
+- 签到任务看板（实时状态）与压测模块
 
-## 目录结构
+## 技术栈
+
+- 前端: Vue 3 + Vite + Socket.IO Client
+- 后端: Express + Socket.IO + MongoDB + Mongoose
+
+## 目录
 
 ```text
-.
-├── frontend/                 # Vue 3 + Vite 前端
-│   ├── src/
-│   │   ├── components/       # 聊天/签到/求助/调度/位置页面组件
-│   │   └── services/         # API 封装与 Socket 客户端
-│   └── .env.example
-├── backend/                  # Express + Socket.IO + MongoDB 后端
-│   ├── src/
-│   │   ├── config/           # MongoDB 连接
-│   │   ├── models/           # Mongoose 数据模型
-│   │   ├── routes/           # REST API 路由
-│   │   ├── socket/           # 实时通信事件
-│   │   ├── app.js
-│   │   └── server.js
-│   └── .env.example
-└── README.md
+frontend/
+  src/components/
+  src/services/
+backend/
+  src/config/
+  src/middleware/
+  src/models/
+  src/routes/
+  src/socket/
+  src/utils/
 ```
 
-## 环境要求
+## 运行
 
-- Node.js >= 18
-- npm >= 9
-- MongoDB（本地或远程实例）
-
-## 快速启动
-
-### 1) 启动后端
+### 后端
 
 ```bash
 cd backend
@@ -40,9 +38,9 @@ npm install
 npm run dev
 ```
 
-后端默认地址：`http://localhost:3001`
+默认: http://localhost:3001
 
-### 2) 启动前端
+### 前端
 
 ```bash
 cd frontend
@@ -51,55 +49,61 @@ npm install
 npm run dev
 ```
 
-前端默认地址：`http://localhost:5173`
+默认: http://localhost:5173
 
-## MongoDB 配置
+## 关键环境变量
 
-在 `backend/.env` 中设置：
+backend/.env:
 
 ```env
 PORT=3001
 MONGODB_URI=mongodb://127.0.0.1:27017/esn_chatroom
 CORS_ORIGIN=http://localhost:5173
+JWT_SECRET=change-me
+JWT_EXPIRES_IN=7d
+SOCKET_SEND_LIMIT=20
+SOCKET_SEND_WINDOW_MS=10000
 ```
 
-## 主要 REST API（示例）
+## 认证 API
 
-- 健康检查：`GET /api/health`
-- 签到：
-  - `POST /api/checkins`
-  - `GET /api/checkins`
-- 求助：
-  - `POST /api/help-requests`
-  - `GET /api/help-requests`
-  - `PATCH /api/help-requests/:id/status`
-- 位置：
-  - `POST /api/locations`
-  - `GET /api/locations`
+- POST /api/auth/register
+- POST /api/auth/login
+- GET /api/auth/me
 
-示例请求：
+## 签到任务 API
+
+- GET /api/checkins
+- POST /api/checkins
+- PATCH /api/checkins/:id/status
+- PATCH /api/checkins/:id/admin (admin)
+- DELETE /api/checkins/:id (admin)
+
+## Socket 事件
+
+客户端发出:
+- presence:list
+- chat:join-room
+- chat:open-private
+- chat:history
+- chat:send-room
+- chat:send-private
+
+服务端推送:
+- presence:update
+- chat:private-room
+- chat:history
+- chat:broadcast
+- chat:delivered
+- chat:error
+- system:message
+- checkin:created
+- checkin:updated
+- checkin:deleted
+
+## 压测脚本
 
 ```bash
-curl -X POST http://localhost:3001/api/help-requests \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "description": "Need medical support",
-    "priority": "high",
-    "location": {"latitude": 40.44, "longitude": -79.95, "detail": "Gate A"}
-  }'
+cd backend
+npm run bench
 ```
-
-## Socket 事件（示例）
-
-- 客户端发送：`chat:send` `{ sender, message }`
-- 服务端广播：`chat:broadcast` `{ id, sender, message, createdAt }`
-- 服务端系统消息：`system:message`
-- 服务端调度广播：`help:status-updated` `{ id, status, updatedAt }`
-
-## 后续 TODO
-
-- 聊天历史分页与鉴权
-- 调度权限模型（指挥员/救援队）
-- 地图组件接入（Leaflet/Mapbox）
-- 告警分级与自动派单策略
-- 端到端测试与部署配置

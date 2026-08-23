@@ -22,4 +22,7 @@ const helpRequestSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
+helpRequestSchema.index({ status: 1, priority: 1, createdAt: -1 });
+helpRequestSchema.index({ 'location.latitude': 1, 'location.longitude': 1 });
+
 module.exports = mongoose.model('HelpRequest', helpRequestSchema);

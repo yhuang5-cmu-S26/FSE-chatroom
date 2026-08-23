@@ -30,7 +30,7 @@ router.post('/', async (req, res, next) => {
 
 router.get('/', async (_req, res, next) => {
   try {
-    const requests = await HelpRequest.find().sort({ createdAt: -1 }).limit(200);
+  const requests = await HelpRequest.find().sort({ status: 1, priority: -1, createdAt: -1 }).limit(200).lean();
     return res.json(requests);
   } catch (error) {
     return next(error);
@@ -42,14 +42,12 @@ router.patch('/:id/status', async (req, res, next) => {
     if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
       return res.status(400).json({ error: 'invalid help request id' });
     }
-    const requestId = new mongoose.Types.ObjectId(req.params.id);
-
     const { status } = req.body;
     if (!status || !validStatuses.has(status)) {
       return res.status(400).json({ error: 'valid status is required' });
     }
 
-    const updated = await HelpRequest.findById(requestId);
+  const updated = await HelpRequest.findById(req.params.id);
 
     if (!updated) {
       return res.status(404).json({ error: 'help request not found' });
