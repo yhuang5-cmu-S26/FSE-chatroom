@@ -1,11 +1,10 @@
 # ESN Chatroom
 
-轻量级应急协作系统，包含：
-- 实时群聊与私聊
-- 在线用户与会话侧栏
-- 消息 ACK、重试、离线补偿
-- JWT 认证与基础 RBAC
-- 签到任务看板（实时状态）与压测模块
+以聊天为核心的移动端社交网络，包含 public、private、group 三种实时聊天模式，签到任务、帖子与管理员 Speed Test。
+
+用户关系使用独立的 `Relationship` 边表；注册时会为新用户和现有用户建立 accepted 关系。群成员关系由 `ChatGroup.members` 管理，服务端 Socket 在读取历史和发送消息前都会校验关系或成员资格。
+
+生产环境应让 TLS 反向代理同时提供 SPA、`/api` 和 `/socket.io`，浏览器使用同源 HTTPS/WSS。Vite 的 HTTP/WS proxy 仅用于本地开发。
 
 ## 技术栈
 
@@ -38,6 +37,8 @@ npm install
 npm run dev
 ```
 
+未配置 MongoDB 时可使用 `DB_DRIVER=json`。`./dev.sh` 默认启用该模式，数据写入 `backend/tmp/mock-data/`。内置账号：`admin@example.com / admin123`、`user@example.com / user1234`。JSON 模式只用于本地开发，不支持多进程并发写入。
+
 默认: http://localhost:3001
 
 ### 前端
@@ -67,8 +68,7 @@ SOCKET_SEND_WINDOW_MS=10000
 
 ## 认证 API
 
-- POST /api/auth/register
-- POST /api/auth/login
+- POST /api/auth/enter（不存在的邮箱注册，存在的邮箱登录）
 - GET /api/auth/me
 
 ## 签到任务 API

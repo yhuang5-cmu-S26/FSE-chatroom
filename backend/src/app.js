@@ -3,10 +3,11 @@ const cors = require('cors');
 const rateLimit = require('express-rate-limit');
 
 const checkinRoutes = require('./routes/checkins');
-const helpRequestRoutes = require('./routes/helpRequests');
+const postRoutes = require('./routes/posts');
 const userRoutes = require('./routes/users');
 const stressRoutes = require('./routes/stress');
 const authRoutes = require('./routes/auth');
+const groupRoutes = require('./routes/groups');
 
 const app = express();
 const corsOrigin = process.env.CORS_ORIGIN || 'http://localhost:5173';
@@ -31,8 +32,9 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/checkins', checkinRoutes);
-app.use('/api/help-requests', helpRequestRoutes);
+app.use('/api/posts', postRoutes);
 app.use('/api/users', userRoutes);
+app.use('/api/groups', groupRoutes);
 app.use('/api/stress', stressRoutes);
 
 app.use((req, res) => {

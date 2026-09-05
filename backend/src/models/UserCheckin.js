@@ -1,33 +1,22 @@
 const mongoose = require('mongoose');
+const { createJsonModel } = require('../config/jsonModel');
 
 const validStatuses = ['pending', 'in_progress', 'blocked', 'resolved'];
 
 const userCheckinSchema = new mongoose.Schema(
   {
-    task: { type: String, required: true, trim: true },
-    note: { type: String, trim: true, default: '' },
-    role: { type: String, required: true, trim: true },
-    priority: {
-      type: String,
-      enum: ['low', 'medium', 'high', 'critical'],
-      default: 'medium',
-    },
-    status: {
-      type: String,
-      enum: validStatuses,
-      default: 'pending',
-    },
-    reporterId: { type: String, required: true, trim: true },
-    reporterName: { type: String, required: true, trim: true },
-    assignedTo: { type: String, trim: true, default: '' },
-    completedAt: { type: Date, default: null },
+    title: { type: String, required: true, trim: true, maxlength: 160 },
+    description: { type: String, trim: true, default: '', maxlength: 2000 },
+    createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    assigneeIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    checkedInUserIds: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
+    dueAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
 
-userCheckinSchema.index({ status: 1, priority: 1, createdAt: -1 });
-userCheckinSchema.index({ role: 1, status: 1, createdAt: -1 });
-userCheckinSchema.index({ reporterId: 1, createdAt: -1 });
-userCheckinSchema.index({ assignedTo: 1, createdAt: -1 });
+userCheckinSchema.index({ assigneeIds: 1, createdAt: -1 });
 
-module.exports = mongoose.model('UserCheckin', userCheckinSchema);
+module.exports = process.env.DB_DRIVER === 'json'
+  ? createJsonModel('checkins', { description: '', assigneeIds: [], checkedInUserIds: [], dueAt: null })
+  : mongoose.model('UserCheckin', userCheckinSchema);

@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const { createJsonModel } = require('../config/jsonModel');
 
 const userSchema = new mongoose.Schema(
   {
@@ -14,4 +15,6 @@ const userSchema = new mongoose.Schema(
 
 userSchema.index({ role: 1, active: 1 });
 
-module.exports = mongoose.model('User', userSchema);
+module.exports = process.env.DB_DRIVER === 'json'
+  ? createJsonModel('users', { role: 'user', active: true })
+  : mongoose.model('User', userSchema);

@@ -4,7 +4,7 @@
   "description": "ESN emergency response backend skeleton",
   "main": "src/server.js",
   "scripts": {
-    "dev": "nodemon src/server.js",
+    "dev": "nodemon --ignore tmp/mock-data/ src/server.js",
     "start": "node src/server.js",
     "test": "node --test",
     "bench": "node scripts/benchmark.js"

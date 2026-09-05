@@ -24,7 +24,7 @@ async function run() {
 
             const t0 = performance.now();
             try {
-                const endpoint = idx % 2 === 0 ? '/health' : '/help-requests';
+                const endpoint = '/health';
                 const response = await fetch(`${BASE_URL}${endpoint}`);
                 if (response.ok) {
                     success += 1;
