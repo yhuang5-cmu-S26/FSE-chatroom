@@ -76,6 +76,7 @@ function createJsonModel(collection, defaults = {}, options = {}) {
     static async exists(filter = {}) { return Boolean(await new Query(collection, filter, true, dataDir)); }
     static async create(input) { const now = new Date().toISOString(); const doc = decorate(collection, { ...clone(defaults), ...clone(input), _id: id(), createdAt: now, updatedAt: now }, dataDir); await doc.save(); return doc; }
     static async findByIdAndDelete(value) { const rows = read(collection, dataDir); const index = rows.findIndex((row) => row._id === String(value)); if (index < 0) return null; const [removed] = rows.splice(index, 1); write(collection, rows, dataDir); return decorate(collection, removed, dataDir); }
+    static async deleteMany(filter = {}) { const rows = read(collection, dataDir); const removed = rows.filter((row) => matches(row, filter)); if (removed.length) write(collection, rows.filter((row) => !matches(row, filter)), dataDir); return { acknowledged: true, deletedCount: removed.length }; }
     static async findByIdAndUpdate(value, update, options = {}) { const doc = await this.findById(value); if (!doc) return null; Object.assign(doc, clone(update)); await doc.save(); return options.new ? doc : doc; }
     static async bulkWrite(operations) { for (const operation of operations) { const { filter, update } = operation.updateOne; if (!await this.exists(filter)) await this.create({ ...filter, ...(update.$setOnInsert || {}) }); } }
   };

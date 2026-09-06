@@ -59,7 +59,7 @@ test('streaming planner forwards reply deltas then validates the final plan', as
 test('empty agent input returns the capability overview without calling an LLM', async () => {
   const plan = await planAgentRequest('', { name: 'Admin', role: 'admin' }, { fetchImpl: async () => { throw new Error('should not call LLM'); } });
   assert.equal(plan.mode, 'capability-overview');
-  assert.equal(plan.capabilities.length, 4);
+  assert.equal(plan.capabilities.length, 5);
 });
 
 test('agent planner validates remote LLM todo output before returning it', async () => {

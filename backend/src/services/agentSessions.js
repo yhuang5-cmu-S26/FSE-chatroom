@@ -1,6 +1,7 @@
 const AgentSession = require("../models/AgentSession");
 const AgentMessage = require("../models/AgentMessage");
-const { buildPromptContext } = require('./historyCompressor');
+const { buildPromptContext } = require("./historyCompressor");
+const { deleteWorkflowStateForSession } = require("./workflowState");
 
 const SESSION_LIMIT = 50;
 
@@ -83,6 +84,17 @@ async function listMessages(sessionId, userId, limit = 100) {
     .lean();
   return messages.map(serializeMessage);
 }
+async function deleteSession(sessionId, userId) {
+  const session = await getOwnedSession(sessionId, userId);
+  if (!session) {
+    const error = new Error("agent session not found");
+    error.status = 404;
+    throw error;
+  }
+  await deleteWorkflowStateForSession(session.id, userId);
+  await AgentMessage.deleteMany({ sessionId: session.id, userId });
+  await AgentSession.findByIdAndDelete(session.id);
+}
 async function promptHistory(sessionId, userId) {
   const session = await getOwnedSession(sessionId, userId);
   if (!session) return [];
@@ -96,7 +108,8 @@ async function promptHistory(sessionId, userId) {
     previous.sourceMessageCount !== context.memory.sourceMessageCount
   ) {
     session.contextMemory = context.memory;
-    if (typeof session.markModified === 'function') session.markModified('contextMemory');
+    if (typeof session.markModified === "function")
+      session.markModified("contextMemory");
     await session.save();
   }
   return context.history;
@@ -108,6 +121,7 @@ module.exports = {
   appendMessage,
   listSessions,
   listMessages,
+  deleteSession,
   promptHistory,
   getOwnedMessage,
   serializeSession,

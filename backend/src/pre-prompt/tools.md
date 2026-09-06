@@ -27,6 +27,12 @@ This file documents the backend tools that may execute an approved Planner actio
     "effect": "read",
     "description": "汇总签到任务数与近期帖子数量。",
     "result": { "taskCount": "number", "recentPostCount": "number" }
+  },
+  {
+    "action": "mcp.weather.forecast",
+    "effect": "read",
+    "description": "调用 allowlist 中的外部 MCP 天气服务，返回天气预报与预警原始结构化结果。",
+    "result": { "provider": "mcp", "server": "weather", "result": "object" }
   }
 ]
 ```

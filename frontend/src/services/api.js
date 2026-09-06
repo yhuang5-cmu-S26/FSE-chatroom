@@ -18,8 +18,15 @@ async function request(path, options = {}) {
       ...(options.headers || {}),
     },
   });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || "request failed");
+  const raw = await response.text();
+  let data = {};
+  try {
+    data = raw ? JSON.parse(raw) : {};
+  } catch {
+    // A reverse proxy may return a non-JSON error page; preserve its status.
+  }
+  if (!response.ok)
+    throw new Error(data.error || `request failed (HTTP ${response.status})`);
   return data;
 }
 
@@ -75,6 +82,8 @@ export const api = {
   agentChatStream: (message, sessionId, handlers) =>
     requestStream("/agent/chat/stream", { message, sessionId }, handlers),
   agentSessions: () => request("/agent/sessions"),
+  deleteAgentSession: (sessionId) =>
+    request(`/agent/sessions/${sessionId}`, { method: "DELETE" }),
   agentSessionMessages: (sessionId) =>
     request(`/agent/sessions/${sessionId}/messages`),
   approveAgentPlan: (sessionId, messageId) =>

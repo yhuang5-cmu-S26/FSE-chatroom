@@ -54,6 +54,35 @@ test('agent conversations persist by user and return server-owned history', asyn
   assert.equal((await history.json()).messages.length, 3);
 });
 
+test('owners can delete an agent session and all completed workflow records', async () => {
+  const user = await login(app.baseUrl, 'Demo User', 'user1234');
+  const headers = { 'content-type': 'application/json', authorization: `Bearer ${user.token}` };
+  const initial = await fetch(`${app.baseUrl}/api/agent/chat`, { method: 'POST', headers, body: JSON.stringify({ message: '' }) });
+  const { session } = await initial.json();
+  const AgentMessage = require('../../src/models/AgentMessage');
+  const WorkflowRun = require('../../src/models/WorkflowRun');
+  const WorkflowStep = require('../../src/models/WorkflowStep');
+  const ToolCall = require('../../src/models/ToolCall');
+  const Approval = require('../../src/models/Approval');
+  const WorkflowEvent = require('../../src/models/WorkflowEvent');
+  const message = await AgentMessage.create({ sessionId: session.id, userId: user.user.id, role: 'assistant', content: '已完成。' });
+  const run = await WorkflowRun.create({ sessionId: session.id, userId: user.user.id, messageId: message.id, state: 'succeeded', requestedAt: new Date(), completedAt: new Date(), stepCount: 1 });
+  const step = await WorkflowStep.create({ runId: run.id, userId: user.user.id, sequence: 0, title: '测试步骤', action: { type: 'post.draft', arguments: {} }, state: 'succeeded' });
+  await Promise.all([
+    ToolCall.create({ runId: run.id, stepId: step.id, userId: user.user.id, actionType: 'post.draft', input: {}, state: 'succeeded', startedAt: new Date() }),
+    Approval.create({ runId: run.id, messageId: message.id, userId: user.user.id, decision: 'approved', decidedAt: new Date() }),
+    WorkflowEvent.create({ runId: run.id, userId: user.user.id, type: 'run.succeeded', payload: {}, occurredAt: new Date() }),
+  ]);
+  const deleted = await fetch(`${app.baseUrl}/api/agent/sessions/${session.id}`, { method: 'DELETE', headers });
+  assert.equal(deleted.status, 204);
+  assert.equal((await fetch(`${app.baseUrl}/api/agent/sessions/${session.id}/messages`, { headers })).status, 404);
+  assert.equal((await WorkflowRun.find({ sessionId: session.id }).lean()).length, 0);
+  assert.equal((await WorkflowStep.find({ runId: run.id }).lean()).length, 0);
+  assert.equal((await ToolCall.find({ runId: run.id }).lean()).length, 0);
+  assert.equal((await Approval.find({ runId: run.id }).lean()).length, 0);
+  assert.equal((await WorkflowEvent.find({ runId: run.id }).lean()).length, 0);
+});
+
 test('agent command plans execute only after their owner approves them', async () => {
   const user = await login(app.baseUrl, 'Demo User', 'user1234');
   const headers = { 'content-type': 'application/json', authorization: `Bearer ${user.token}` };

@@ -47,6 +47,22 @@ The following machine-readable manifest is authoritative. `action` is the only a
     "description": "汇总当前任务、帖子和在线人员状态",
     "requiresConfirmation": false,
     "inputSchema": { "type": "object", "additionalProperties": false }
+  },
+  {
+    "action": "mcp.weather.forecast",
+    "title": "外部天气核验",
+    "description": "通过受控 MCP 天气服务查询指定坐标未来时段的天气与预警",
+    "requiresConfirmation": false,
+    "inputSchema": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "latitude": { "type": "number", "minimum": -90, "maximum": 90 },
+        "longitude": { "type": "number", "minimum": -180, "maximum": 180 },
+        "hours": { "type": "integer", "minimum": 1, "maximum": 72 }
+      },
+      "required": ["latitude", "longitude", "hours"]
+    }
   }
 ]
 ```

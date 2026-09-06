@@ -97,4 +97,19 @@ async function getRunDetail(run) {
   return { run: value(run), steps, toolCalls, approvals, events };
 }
 
-module.exports = { createRun, getRun, approveRun, startStep, completeStep, finishRun, retryRun, handoffRun, getRunDetail };
+async function deleteWorkflowStateForSession(sessionId, userId) {
+  const runs = await WorkflowRun.find({ sessionId, userId }).lean();
+  if (runs.some((run) => run.state === 'running')) {
+    const error = new Error('cannot delete a session with a running workflow');
+    error.status = 409;
+    throw error;
+  }
+  await Promise.all(runs.flatMap((run) => {
+    const runId = String(run._id || run.id);
+    return [WorkflowStep.deleteMany({ runId }), ToolCall.deleteMany({ runId }), Approval.deleteMany({ runId }), WorkflowEvent.deleteMany({ runId })];
+  }));
+  await WorkflowRun.deleteMany({ sessionId, userId });
+  return { deletedRunCount: runs.length };
+}
+
+module.exports = { createRun, getRun, approveRun, startStep, completeStep, finishRun, retryRun, handoffRun, getRunDetail, deleteWorkflowStateForSession };

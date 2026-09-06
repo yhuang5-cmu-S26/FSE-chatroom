@@ -31,8 +31,22 @@ function registerSocketHandlers(io) {
   io.on('connection', async (socket) => {
     const user = socket.data.user; const id = String(user.id);
     online.set(id, { id, name: user.name, role: user.role, online: true }); socket.join(`user:${id}`); socket.join(publicRoom); publishPresence(io);
-    const [users, groups, posts, checkins] = await Promise.all([User.find().select('name role active').lean(), ChatGroup.find({ members: id }).lean(), Post.find().sort({ createdAt: -1 }).limit(100).lean(), UserCheckin.find().sort({ createdAt: -1 }).limit(100).lean()]);
-    socket.emit('app:bootstrap', { users: users.filter((u) => u.active).map((u) => ({ id: String(u._id), name: u.name, role: u.role, online: online.has(String(u._id)) })), groups, posts, checkins });
+    const [relationships, allUsers, groups, posts, checkins] = await Promise.all([
+      Relationship.find({ status: 'accepted' }).lean(),
+      User.find().select('name role active').lean(),
+      ChatGroup.find({ members: id }).lean(),
+      Post.find().sort({ createdAt: -1 }).limit(100).lean(),
+      UserCheckin.find().sort({ createdAt: -1 }).limit(100).lean(),
+    ]);
+    const contactIds = new Set();
+    for (const relationship of relationships) {
+      if (String(relationship.userLow) === id) contactIds.add(String(relationship.userHigh));
+      if (String(relationship.userHigh) === id) contactIds.add(String(relationship.userLow));
+    }
+    const contacts = allUsers
+      .filter((candidate) => candidate.active && contactIds.has(String(candidate._id)))
+      .map((candidate) => ({ id: String(candidate._id), name: candidate.name, role: candidate.role, online: online.has(String(candidate._id)) }));
+    socket.emit('app:bootstrap', { contacts, groups, posts, checkins });
     socket.on('chat:open', async ({ mode, targetId } = {}, ack) => {
       try { const access = await canAccess(id, clean(mode, 20), clean(targetId, 64)); if (!access) throw Error('forbidden'); socket.join(access.room); const messages = await ChatMessage.find({ room: access.room }).sort({ createdAt: -1 }).limit(50).lean(); ack?.({ ok: true, room: access.room, messages: messages.reverse() }); } catch { ack?.({ ok: false, error: 'chat access denied' }); }
     });

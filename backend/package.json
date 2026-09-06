@@ -4,19 +4,21 @@
   "description": "ESN emergency response backend skeleton",
   "main": "src/server.js",
   "scripts": {
-    "dev": "nodemon --ignore tmp/mock-data/ src/server.js",
+    "dev": "nodemon --ignore 'tmp/**' src/server.js",
     "start": "node src/server.js",
     "test": "node --test tests/integration/*.test.js tests/unit/*.test.js",
     "test:context": "node --test tests/context/*.test.js",
     "test:performance": "node tests/performance/benchmark.js",
     "test:performance:compare": "node scripts/comparePerformance.js",
     "verify": "node scripts/verify.js",
-    "bench": "node tests/performance/benchmark.js"
+    "bench": "node tests/performance/benchmark.js",
+    "reset:mock": "node scripts/resetMockData.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
     "ajv": "^8.20.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.6",

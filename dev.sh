@@ -9,13 +9,31 @@ CERT_DIR="$ROOT_DIR/.cert"
 TLS_KEY="$CERT_DIR/localhost-key.pem"
 TLS_CERT="$CERT_DIR/localhost-cert.pem"
 
+release_port() {
+  local port="$1"
+  local pids
+  pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+  [[ -z "$pids" ]] && return
+
+  echo "端口 $port 已被占用，正在停止监听进程: $pids"
+  kill $pids 2>/dev/null || true
+  for _ in {1..10}; do
+    sleep 0.2
+    lsof -tiTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1 || return
+  done
+  echo "错误：端口 $port 的进程未在 SIGTERM 后退出，请手动处理。" >&2
+  exit 1
+}
+
 cleanup() {
   trap - TERM INT EXIT
   if [[ -n "${BACKEND_PID:-}" ]]; then
-    kill "$BACKEND_PID" 2>/dev/null || true
+    kill -TERM -- "-$BACKEND_PID" 2>/dev/null || true
+    wait "$BACKEND_PID" 2>/dev/null || true
   fi
   if [[ -n "${FRONTEND_PID:-}" ]]; then
-    kill "$FRONTEND_PID" 2>/dev/null || true
+    kill -TERM -- "-$FRONTEND_PID" 2>/dev/null || true
+    wait "$FRONTEND_PID" 2>/dev/null || true
   fi
 }
 
@@ -25,6 +43,19 @@ command -v npm >/dev/null 2>&1 || {
   echo "错误：未找到 npm，请先安装 Node.js。" >&2
   exit 1
 }
+
+command -v lsof >/dev/null 2>&1 || {
+  echo "错误：启动前端口检查需要 lsof。" >&2
+  exit 1
+}
+
+command -v setsid >/dev/null 2>&1 || {
+  echo "错误：优雅管理开发进程需要 setsid。" >&2
+  exit 1
+}
+
+release_port 3001
+release_port 5173
 
 command -v openssl >/dev/null 2>&1 || {
   echo "错误：HTTPS 开发启动需要 openssl。" >&2
@@ -56,10 +87,10 @@ fi
 
 echo "启动后端和前端，按 Ctrl+C 同时停止..."
 
-(cd "$BACKEND_DIR" && DB_DRIVER=json TLS_KEY_PATH="$TLS_KEY" TLS_CERT_PATH="$TLS_CERT" CORS_ORIGIN=https://localhost:5173 npm run dev) &
+setsid env DB_DRIVER=json TLS_KEY_PATH="$TLS_KEY" TLS_CERT_PATH="$TLS_CERT" CORS_ORIGIN=https://localhost:5173 bash -c 'cd "$1" && exec npm run dev' _ "$BACKEND_DIR" &
 BACKEND_PID=$!
 
-(cd "$FRONTEND_DIR" && VITE_TLS_KEY_PATH="$TLS_KEY" VITE_TLS_CERT_PATH="$TLS_CERT" VITE_BACKEND_URL=https://localhost:3001 VITE_SOCKET_URL=https://localhost:5173 npm run dev) &
+setsid env VITE_TLS_KEY_PATH="$TLS_KEY" VITE_TLS_CERT_PATH="$TLS_CERT" VITE_BACKEND_URL=https://localhost:3001 VITE_SOCKET_URL=https://localhost:5173 bash -c 'cd "$1" && exec npm run dev' _ "$FRONTEND_DIR" &
 FRONTEND_PID=$!
 
 wait "$BACKEND_PID" "$FRONTEND_PID"

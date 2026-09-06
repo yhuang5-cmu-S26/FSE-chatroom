@@ -67,8 +67,9 @@ async function loadAgentPrompts() {
     throw new Error(
       "capabilities.md and tools.md must define the same actions",
     );
-  const { registeredActions } = require("./agentTools");
-  const implementationActions = [...registeredActions].sort();
+  const { registeredActions: internalActions } = require("./agentTools");
+  const { registeredActions: mcpActions } = require("./mcp/agentMCPTools");
+  const implementationActions = [...internalActions, ...mcpActions].sort();
   if (capabilityActions.join("|") !== implementationActions.join("|"))
     throw new Error(
       "capabilities.md and agentTools.js must define the same actions",
@@ -92,6 +93,7 @@ async function loadAgentPrompts() {
     validatePlan: ajv.compile(protocolSchema),
   };
   console.log(`Agent prompts loaded from ${promptDir}`);
+  console.log('Agent capability and system prompt loading has been finished.');
   return registry;
 }
 

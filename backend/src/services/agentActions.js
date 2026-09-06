@@ -1,4 +1,5 @@
 const { getAgentPrompts } = require("./promptRegistry");
+const { getActionRoute, isActionEnabled } = require("../config/mcp");
 
 async function describeActions() {
   const { capabilities } = await getAgentPrompts();
@@ -108,6 +109,7 @@ function validatePlan(candidate, actor, config) {
   if (!config.validatePlan(candidate))
     throw validationError(config.validatePlan.errors);
   if (candidate.intent === "conversation") {
+    console.log('Agent response JSON parsing and Todo validation has been finished.');
     return {
       reply: candidate.reply,
       intent: "conversation",
@@ -130,6 +132,11 @@ function validatePlan(candidate, actor, config) {
       rejectionReason = `action 参数不符合 Schema：${capability.action}`;
     else if (capability.requiredRole && capability.requiredRole !== actor?.role)
       rejectionReason = `action ${capability.action} 需要 ${capability.requiredRole} 权限`;
+    else if (
+      getActionRoute(item.action.type) &&
+      !isActionEnabled(item.action.type)
+    )
+      rejectionReason = `外部 MCP 工具尚未配置：${item.action.type}`;
     if (rejectionReason) rejections.push(`${item.title}（${rejectionReason}）`);
     return {
       id: item.id,
@@ -145,6 +152,7 @@ function validatePlan(candidate, actor, config) {
   ];
   const canCover =
     Boolean(candidate.coverage.canCover) && unsupported.length === 0;
+  console.log('Agent response JSON parsing and Todo validation has been finished.');
   return {
     reply: candidate.reply,
     intent: "command",
@@ -203,6 +211,7 @@ async function planAgentRequest(
   );
   try {
     const body = modelRequestBody(config, actor, history, input);
+    console.log('Agent LLM request assembly has been finished.');
     const response = await fetchImpl(url, {
       method: "POST",
       signal: controller.signal,
@@ -238,13 +247,15 @@ async function planAgentRequestStream(
   if (!url || !apiKey || !model)
     return planAgentRequest(input, actor, { fetchImpl, history });
   const config = await getAgentPrompts();
+  const body = modelRequestBody(config, actor, history, input, true);
+  console.log('Agent LLM request assembly has been finished.');
   const response = await fetchImpl(url, {
     method: "POST",
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${apiKey}`,
     },
-    body: JSON.stringify(modelRequestBody(config, actor, history, input, true)),
+    body: JSON.stringify(body),
   });
   if (!response.ok || !response.body)
     throw new Error(`LLM streaming API returned ${response.status}`);
@@ -283,7 +294,9 @@ async function executeAgentAction(action, actor, context = {}) {
     throw new Error(`invalid action arguments: ${action.type}`);
   if (capability.requiredRole && capability.requiredRole !== actor?.role)
     throw new Error(`forbidden action: ${action.type}`);
-  return require("./agentTools").execute(action, actor, context);
+  return getActionRoute(action.type)
+    ? require("./mcp/agentMCPTools").executeActions(action, actor, context)
+    : require("./agentTools").execute(action, actor, context);
 }
 module.exports = {
   describeActions,

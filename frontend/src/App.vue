@@ -14,9 +14,17 @@ const me = ref(),
     chat = ref({ mode: "public", targetId: "" }),
     text = ref(""),
     run = ref(),
-    notice = ref(null);
+    notice = ref(null),
+    contactPage = ref(1);
 let noticeTimer;
 const admin = computed(() => me.value?.role === "admin");
+const CONTACTS_PER_PAGE = 6;
+const sortedContacts = computed(() => [...users.value].sort((left, right) => Number(right.online) - Number(left.online) || left.name.localeCompare(right.name, 'zh-CN')));
+const contactPageCount = computed(() => Math.max(1, Math.ceil(sortedContacts.value.length / CONTACTS_PER_PAGE)));
+const pagedContacts = computed(() => sortedContacts.value.slice((contactPage.value - 1) * CONTACTS_PER_PAGE, contactPage.value * CONTACTS_PER_PAGE));
+function moveContactPage(direction) {
+    contactPage.value = Math.min(contactPageCount.value, Math.max(1, contactPage.value + direction));
+}
 function showNotice(message, type = "success") {
     notice.value = { message, type };
     clearTimeout(noticeTimer);
@@ -112,7 +120,8 @@ function logout() {
 }
 onMounted(() => {
     socket.on("app:bootstrap", (x) => {
-        users.value = x.users;
+        users.value = x.contacts || [];
+        contactPage.value = 1;
         groups.value = x.groups;
         posts.value = x.posts;
         tasks.value = x.checkins;
@@ -120,10 +129,11 @@ onMounted(() => {
     socket.on("presence:update", (x) => {
         const on = new Set(x.users.map((u) => u.id));
         users.value = users.value.map((u) => ({ ...u, online: on.has(u.id) }));
+        contactPage.value = Math.min(contactPage.value, contactPageCount.value);
     });
-    socket.on("network:user-added", (x) =>
-        users.value.push({ ...x.user, online: false }),
-    );
+    socket.on("network:user-added", (x) => {
+        if (x.user.id !== me.value?.id && !users.value.some((user) => user.id === x.user.id)) users.value.push({ ...x.user, online: false });
+    });
     socket.on("group:created", (x) => groups.value.unshift(x));
     socket.on("post:created", (x) => posts.value.unshift(x));
     socket.on("checkin:created", (x) => tasks.value.unshift(x));
@@ -140,60 +150,64 @@ onMounted(() => {
 </script>
 <template>
     <main class="phone">
-        <header>
-            <b>Social Chat</b><button v-if="me" @click="logout">Hi, {{ me.name }}</button><span v-else>Sign up /
-                in</span>
+        <header class="topbar">
+            <div class="brand"><span class="brand-mark">S</span><div><b>Social Chat</b><small>Emergency network</small></div></div>
+            <button v-if="me" class="account-button" @click="logout"><span>{{ me.name.slice(0, 1).toUpperCase() }}</span>Hi, {{ me.name }}</button><span v-else class="auth-status">Sign up / in</span>
         </header>
-        <section v-if="!me">
-            <h1>社交网络</h1>
-            <p>已有用户名仅校验密码；新用户名需填写邮箱后自动注册。</p>
-            <input v-model="auth.name" placeholder="用户名" /><input v-model="auth.email" placeholder="邮箱（仅新用户必填）" /><input
-                v-model="auth.password" type="password" placeholder="密码（6 位以上）" /><button @click="enter">Sign in / Sign up</button>
+        <section v-if="!me" class="auth-screen">
+            <div class="auth-hero"><span>协作 · 响应 · 连接</span><h1>在这里，保持联络</h1><p>已有用户名直接登录；首次使用填写邮箱后自动注册。</p></div>
+            <div class="auth-card">
+                <label>用户名<input v-model="auth.name" autocomplete="username" placeholder="例如：Admin" /></label>
+                <label>邮箱 <small>新用户必填</small><input v-model="auth.email" type="email" autocomplete="email" placeholder="name@example.com" /></label>
+                <label>密码<input v-model="auth.password" type="password" autocomplete="current-password" placeholder="至少 6 位" @keyup.enter="enter" /></label>
+                <button class="primary-action" @click="enter">进入协作网络 <span>→</span></button>
+            </div>
         </section>
         <template v-else>
-            <section v-if="view === 'home'">
+            <section v-if="view === 'home'" class="home-screen">
+                <div class="welcome-card"><div><span>当前在线</span><h1>你好，{{ me.name }}</h1><p>{{ users.filter((user) => user.online).length }} 位联系人正在协作</p></div><i class="presence-orb" /></div>
+                <div class="section-heading"><div><span>快捷入口</span><h2>开始协作</h2></div><small>{{ admin ? '管理员模式' : '成员模式' }}</small></div>
                 <div class="tiles">
-                    <button @click="open('public')">公共聊天</button><button @click="view = 'private'">私聊</button><button
-                        @click="view = 'groups'">群组聊天</button><button @click="view = 'posts'">发帖</button><button
-                        @click="view = 'tasks'">签到</button><button v-if="admin" @click="view = 'speed'">Speed
-                        test</button>
+                    <button class="feature-tile public" @click="open('public')"><span>◌</span><b>公共聊天</b><small>实时广播</small></button><button class="feature-tile private" @click="view = 'private'"><span>⌁</span><b>私聊</b><small>联系人沟通</small></button><button class="feature-tile group" @click="view = 'groups'"><span>◫</span><b>群组聊天</b><small>任务小组</small></button><button class="feature-tile post" @click="view = 'posts'"><span>✦</span><b>发布动态</b><small>同步现场信息</small></button><button class="feature-tile checkin" @click="view = 'tasks'"><span>✓</span><b>签到</b><small>确认人员状态</small></button><button v-if="admin" class="feature-tile speed" @click="view = 'speed'"><span>↗</span><b>Speed test</b><small>服务压力测试</small></button>
                 </div>
-                <h2>联系人</h2>
-                <button class="user" v-for="u in users" :key="u.id" @click="open('private', u.id)">
-                    <i :class="{ on: u.online }" />{{ u.name }}
-                    <small>{{ u.role }}</small>
+                <div class="section-heading contacts-heading"><div><span>你的网络</span><h2>联系人</h2></div><small>{{ sortedContacts.length }} 位</small></div>
+                <p v-if="!pagedContacts.length" class="empty-contacts">暂无联系人</p>
+                <button class="user" v-for="u in pagedContacts" :key="u.id" @click="open('private', u.id)">
+                    <span class="avatar">{{ u.name.slice(0, 1).toUpperCase() }}</span><span class="user-name">{{ u.name }}<small>{{ u.role }}</small></span><span class="user-state"><i :class="{ on: u.online }" />{{ u.online ? '在线' : '离线' }}</span>
                 </button>
+                <div v-if="contactPageCount > 1" class="contact-pagination">
+                    <button :disabled="contactPage === 1" @click="moveContactPage(-1)">上一页</button>
+                    <span>{{ contactPage }} / {{ contactPageCount }}</span>
+                    <button :disabled="contactPage === contactPageCount" @click="moveContactPage(1)">下一页</button>
+                </div>
             </section>
-            <section v-else>
-                <button @click="view = 'home'">← 首页</button>
+            <section v-else class="content-screen">
+                <button class="back-button" @click="view = 'home'">← 返回首页</button>
                 <div v-if="view === 'chat'">
-                    <h2>{{ chat.mode }} chat</h2>
-                    <article v-for="m in messages" :key="m._id">
+                    <div class="page-title"><span>{{ chat.mode === 'public' ? '公共频道' : chat.mode === 'private' ? '私聊' : '群组聊天' }}</span><h2>实时对话</h2></div>
+                    <article class="chat-message" v-for="m in messages" :key="m._id">
                         {{ m.sender }}: {{ m.message }}
                     </article>
-                    <input v-model="text" @keyup.enter="send" placeholder="消息" /><button @click="send">
-                        发送
-                    </button>
+                    <div class="message-composer"><input v-model="text" @keyup.enter="send" placeholder="输入消息…" /><button @click="send">发送</button></div>
                 </div>
-                <div v-if="view === 'private'" v-for="u in users.filter((u) => u.id !== me.id)" :key="u.id">
-                    <button @click="open('private', u.id)">{{ u.name }}</button>
+                <div v-if="view === 'private'" class="list-page"><div class="page-title"><span>联系人</span><h2>选择一位成员</h2></div><button class="contact-choice" v-for="u in sortedContacts" :key="u.id" @click="open('private', u.id)"><span class="avatar">{{ u.name.slice(0, 1).toUpperCase() }}</span>{{ u.name }}<small>{{ u.online ? '在线' : '离线' }}</small></button>
                 </div>
                 <div v-if="view === 'groups'">
-                    <button @click="group">新建群组</button>
+                    <div class="page-title"><span>协作空间</span><h2>群组聊天</h2></div><button class="primary-action" @click="group">新建群组</button>
                     <p v-for="g in groups" :key="g._id">
-                        <button @click="open('group', g._id)">{{ g.name }}</button>
+                        <button class="list-button" @click="open('group', g._id)">{{ g.name }} <span>→</span></button>
                     </p>
                 </div>
                 <div v-if="view === 'posts'">
-                    <button @click="post">发布帖子</button>
-                    <article v-for="p in posts" :key="p._id">
+                    <div class="page-title"><span>现场动态</span><h2>信息发布</h2></div><button class="primary-action" @click="post">发布帖子</button>
+                    <article class="content-card" v-for="p in posts" :key="p._id">
                         <b>{{ p.authorName }}</b>
                         <p>{{ p.content }}</p>
                     </article>
                 </div>
                 <div v-if="view === 'tasks'">
-                    <button v-if="admin" @click="task">发布签到任务</button>
-                    <article v-for="t in tasks" :key="t._id">
+                    <div class="page-title"><span>人员状态</span><h2>签到任务</h2></div><button v-if="admin" class="primary-action" @click="task">发布签到任务</button>
+                    <article class="content-card" v-for="t in tasks" :key="t._id">
                         <b>{{ t.title }}</b> {{ t.checkedInUserIds?.length || 0 }}/{{
                             t.assigneeIds?.length || 0
                         }}
@@ -206,9 +220,7 @@ onMounted(() => {
                     </article>
                 </div>
                 <div v-if="view === 'speed' && admin">
-                    <button @click="startSpeedTest">
-                        开始
-                    </button>
+                    <div class="page-title"><span>管理员工具</span><h2>Speed test</h2></div><button class="primary-action" @click="startSpeedTest">开始压测</button>
                     <pre v-if="run">{{ run }}</pre>
                 </div>
             </section>
