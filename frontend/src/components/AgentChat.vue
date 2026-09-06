@@ -26,6 +26,10 @@ function canApprove(message) {
   return message.role === 'assistant' && message.planner?.intent === 'command' && message.planner?.approvalStatus === 'pending' && message.coverage?.canCover;
 }
 
+function canHandoff(message) {
+  return message.role === 'assistant' && message.planner?.intent === 'command' && !message.planner?.handoff?.requestedAt && ['pending', 'failed', 'rejected'].includes(message.planner?.approvalStatus);
+}
+
 async function approve(message) {
   if (!canApprove(message) || loading.value) return;
   loading.value = true;
@@ -35,6 +39,21 @@ async function approve(message) {
     messages.value = messages.value.map((item) => item.id === updated.id ? updated : item);
   } catch (error) {
     messages.value.push({ id: `approve-error-${Date.now()}`, role: 'assistant', error: true, content: `执行失败：${error.message}` });
+  } finally {
+    loading.value = false;
+    await scrollToLatest();
+  }
+}
+
+async function handoff(message) {
+  if (!canHandoff(message) || loading.value) return;
+  loading.value = true;
+  try {
+    const result = await api.handoffAgentPlan(sessionId.value, message.id);
+    const updated = toUiMessage(result.message);
+    messages.value = messages.value.map((item) => item.id === updated.id ? updated : item);
+  } catch (error) {
+    messages.value.push({ id: `handoff-error-${Date.now()}`, role: 'assistant', error: true, content: `无法登记人工接管：${error.message}` });
   } finally {
     loading.value = false;
     await scrollToLatest();
@@ -149,7 +168,9 @@ async function send(value = input.value) {
             </small>
             <small v-if="message.requiresConfirmation" class="agent-confirm">写操作将在确认后执行</small>
             <button v-if="canApprove(message)" type="button" class="agent-approve" :disabled="loading" @click="approve(message)">Approve 并执行</button>
+            <button v-if="canHandoff(message)" type="button" class="agent-handoff" :disabled="loading" @click="handoff(message)">交由人工处理</button>
             <small v-if="message.planner?.approvalStatus === 'executed'" class="agent-executed">已执行{{ message.planner.execution?.steps?.length ? `（${message.planner.execution.steps.length} 步）` : '' }}</small>
+            <small v-if="message.planner?.handoff?.requestedAt" class="agent-executed">已登记人工接管</small>
             <small v-if="message.planner?.approvalStatus === 'failed'" class="agent-coverage unsupported">执行失败，请查看步骤结果。</small>
           </article>
           <article v-if="loading" class="agent-message assistant agent-thinking">Agent 正在分析 Todo 与能力范围…</article>

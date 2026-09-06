@@ -30,4 +30,5 @@ export const api = {
   agentSessions: () => request('/agent/sessions'),
   agentSessionMessages: (sessionId) => request(`/agent/sessions/${sessionId}/messages`),
   approveAgentPlan: (sessionId, messageId) => request(`/agent/sessions/${sessionId}/approve`, { method: 'POST', body: JSON.stringify({ messageId }) }),
+  handoffAgentPlan: (sessionId, messageId, reason = '') => request(`/agent/sessions/${sessionId}/handoff`, { method: 'POST', body: JSON.stringify({ messageId, reason }) }),
 };

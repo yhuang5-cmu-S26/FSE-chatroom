@@ -86,3 +86,30 @@ test('agent command plans execute only after their owner approves them', async (
   });
   assert.equal(duplicate.status, 409);
 });
+
+test('agent eval is admin-only and records an explicit human handoff', async () => {
+  const user = await login(app.baseUrl, 'Demo User', 'user1234');
+  const admin = await login(app.baseUrl, 'Admin', 'admin123');
+  const headers = { 'content-type': 'application/json', authorization: `Bearer ${user.token}` };
+  const initial = await fetch(`${app.baseUrl}/api/agent/chat`, { method: 'POST', headers, body: JSON.stringify({ message: '' }) });
+  const initialBody = await initial.json();
+  const AgentMessage = require('../../src/models/AgentMessage');
+  const plan = await AgentMessage.create({
+    sessionId: initialBody.session.id, userId: user.user.id, role: 'assistant', content: '需要人工确认。',
+    planner: {
+      mode: 'llm-plan', intent: 'command', requestedAt: new Date(), approvalStatus: 'pending',
+      todo: [{ id: 'publish', title: '发布通知', action: { type: 'post.publish', arguments: { content: '公告' } }, status: 'planned' }],
+      coverage: { canCover: true, reason: '能力可覆盖。', unsupported: [] },
+    },
+  });
+  const handoff = await fetch(`${app.baseUrl}/api/agent/sessions/${initialBody.session.id}/handoff`, {
+    method: 'POST', headers, body: JSON.stringify({ messageId: plan.id, reason: '由现场调度员接手' }),
+  });
+  assert.equal(handoff.status, 200);
+  assert.equal((await handoff.json()).message.planner.approvalStatus, 'handed_off');
+  assert.equal((await request('/api/agent/evals/summary', user.token)).status, 403);
+  const reportResponse = await request('/api/agent/evals/summary', admin.token);
+  const report = await reportResponse.json();
+  assert.equal(reportResponse.status, 200);
+  assert.ok(report.metrics.humanTakeoverRate > 0);
+});

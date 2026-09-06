@@ -1,5 +1,5 @@
 const express = require("express");
-const { authenticate } = require("../middleware/auth");
+const { authenticate, authorize } = require("../middleware/auth");
 const {
   planAgentRequest,
   welcomeResponse,
@@ -16,6 +16,8 @@ const {
   serializeSession,
   serializeMessage,
 } = require("../services/agentSessions");
+const AgentMessage = require('../models/AgentMessage');
+const { evaluateAgentMessages, classifyError } = require('../services/agentEvaluation');
 
 const router = express.Router();
 router.use(authenticate);
@@ -51,6 +53,7 @@ router.get("/sessions/:sessionId/messages", async (req, res, next) => {
 });
 router.post("/chat", async (req, res, next) => {
   try {
+    const requestedAt = new Date();
     const session = await resolveSession(req.body.sessionId, req.user.id);
     const input =
       typeof req.body.message === "string" ? req.body.message.trim() : "";
@@ -99,6 +102,8 @@ router.post("/chat", async (req, res, next) => {
         requiresConfirmation: result.requiresConfirmation,
         approvalStatus,
         model: process.env.LLM_MODEL || "",
+        requestedAt,
+        planningLatencyMs: Date.now() - requestedAt.getTime(),
       },
     });
     return res.json({
@@ -109,6 +114,13 @@ router.post("/chat", async (req, res, next) => {
   } catch (error) {
     return next(error);
   }
+});
+
+router.get('/evals/summary', authorize('admin'), async (_req, res, next) => {
+  try {
+    const messages = await AgentMessage.find({ role: 'assistant' }).lean();
+    return res.json(evaluateAgentMessages(messages));
+  } catch (error) { return next(error); }
 });
 
 router.post("/sessions/:sessionId/approve", async (req, res, next) => {
@@ -151,7 +163,7 @@ router.post("/sessions/:sessionId/approve", async (req, res, next) => {
         steps.push({ id: step.id, status: "executed", result });
       } catch (error) {
         step.status = "failed";
-        steps.push({ id: step.id, status: "failed", error: error.message });
+        steps.push({ id: step.id, status: "failed", error: error.message, errorType: classifyError(error.message) });
         break;
       }
     }
@@ -169,5 +181,19 @@ router.post("/sessions/:sessionId/approve", async (req, res, next) => {
   } catch (error) {
     return next(error);
   }
+});
+
+router.post('/sessions/:sessionId/handoff', async (req, res, next) => {
+  try {
+    const session = await resolveSession(req.params.sessionId, req.user.id);
+    const message = await getOwnedMessage(req.body.messageId, session.id, req.user.id);
+    if (!message?.planner || message.planner.intent !== 'command') return res.status(400).json({ error: 'message does not contain a command plan' });
+    if (message.planner.approvalStatus === 'executed') return res.status(409).json({ error: 'executed command plan cannot be handed off' });
+    message.planner.handoff = { requestedAt: new Date(), reason: String(req.body.reason || '').trim().slice(0, 500) };
+    if (message.planner.approvalStatus === 'pending') message.planner.approvalStatus = 'handed_off';
+    if (typeof message.markModified === 'function') message.markModified('planner');
+    await message.save();
+    return res.json({ message: serializeMessage(message) });
+  } catch (error) { return next(error); }
 });
 module.exports = router;
