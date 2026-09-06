@@ -81,6 +81,14 @@ test('agent command plans execute only after their owner approves them', async (
   assert.equal(response.status, 200);
   assert.equal(body.message.planner.approvalStatus, 'executed');
   assert.equal(body.message.planner.execution.steps[0].status, 'executed');
+  const workflow = await fetch(`${app.baseUrl}/api/agent/runs/${body.message.planner.runId}`, { headers });
+  const workflowBody = await workflow.json();
+  assert.equal(workflow.status, 200);
+  assert.equal(workflowBody.run.state, 'succeeded');
+  assert.equal(workflowBody.steps[0].state, 'succeeded');
+  assert.equal(workflowBody.toolCalls[0].state, 'succeeded');
+  assert.equal(workflowBody.approvals[0].decision, 'approved');
+  assert.ok(workflowBody.events.some((event) => event.type === 'run.succeeded'));
   const duplicate = await fetch(`${app.baseUrl}/api/agent/sessions/${initialBody.session.id}/approve`, {
     method: 'POST', headers, body: JSON.stringify({ messageId: plan.id }),
   });

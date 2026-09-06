@@ -49,6 +49,55 @@ function parseModelJson(content) {
   );
 }
 
+function modelRequestBody(config, actor, history, input, stream = false) {
+  const body = {
+    model: process.env.LLM_MODEL,
+    temperature: 0.1,
+    stream,
+    messages: [
+      { role: "system", content: buildSystemPrompt(config, actor) },
+      ...sanitizeHistory(history),
+      { role: "user", content: input },
+    ],
+  };
+  if (process.env.LLM_STRUCTURED_OUTPUTS === "true")
+    body.response_format = {
+      type: "json_schema",
+      json_schema: {
+        name: "agent_plan",
+        strict: true,
+        schema: config.protocolSchema,
+      },
+    };
+  return body;
+}
+
+function replyFromPartialJson(text) {
+  const match = /"reply"\s*:\s*"/.exec(text);
+  if (!match) return "";
+  let value = "";
+  let escaped = false;
+  for (
+    let index = match.index + match[0].length;
+    index < text.length;
+    index += 1
+  ) {
+    const char = text[index];
+    if (!escaped && char === '"') break;
+    if (!escaped && char === "\\") {
+      escaped = true;
+      value += char;
+      continue;
+    }
+    escaped = false;
+    value += char;
+  }
+  return value
+    .replace(/\\n/g, "\n")
+    .replace(/\\"/g, '"')
+    .replace(/\\\\/g, "\\");
+}
+
 function validationError(errors) {
   return new Error(
     `LLM plan violates JSON Action protocol: ${(errors || []).map((item) => `${item.instancePath || "/"} ${item.message}`).join("; ")}`,
@@ -153,24 +202,7 @@ async function planAgentRequest(
     Number(process.env.LLM_TIMEOUT_MS) || 15000,
   );
   try {
-    const body = {
-      model,
-      temperature: 0.1,
-      messages: [
-        { role: "system", content: buildSystemPrompt(config, actor) },
-        ...sanitizeHistory(history),
-        { role: "user", content: input },
-      ],
-    };
-    if (process.env.LLM_STRUCTURED_OUTPUTS === "true")
-      body.response_format = {
-        type: "json_schema",
-        json_schema: {
-          name: "agent_plan",
-          strict: true,
-          schema: config.protocolSchema,
-        },
-      };
+    const body = modelRequestBody(config, actor, history, input);
     const response = await fetchImpl(url, {
       method: "POST",
       signal: controller.signal,
@@ -192,6 +224,57 @@ async function planAgentRequest(
   }
 }
 
+async function planAgentRequestStream(
+  message,
+  actor,
+  { fetchImpl = fetch, history = [], onDelta = () => {} } = {},
+) {
+  const input =
+    typeof message === "string" ? message.trim().slice(0, 2000) : "";
+  if (!input) return welcomeResponse(actor);
+  const url = process.env.LLM_API_URL;
+  const apiKey = process.env.LLM_API_KEY;
+  const model = process.env.LLM_MODEL;
+  if (!url || !apiKey || !model)
+    return planAgentRequest(input, actor, { fetchImpl, history });
+  const config = await getAgentPrompts();
+  const response = await fetchImpl(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(modelRequestBody(config, actor, history, input, true)),
+  });
+  if (!response.ok || !response.body)
+    throw new Error(`LLM streaming API returned ${response.status}`);
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let emitted = "";
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+    const lines = buffer.split("\n");
+    buffer = done ? "" : lines.pop();
+    for (const line of lines) {
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice(5).trim();
+      if (!payload || payload === "[DONE]") continue;
+      const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content || "";
+      content += delta;
+      const reply = replyFromPartialJson(content);
+      if (reply.length > emitted.length) {
+        onDelta(reply.slice(emitted.length));
+        emitted = reply;
+      }
+    }
+    if (done) break;
+  }
+  return validatePlan(parseModelJson(content), actor, config);
+}
+
 async function executeAgentAction(action, actor, context = {}) {
   const { capabilityByAction } = await getAgentPrompts();
   const capability = capabilityByAction.get(action?.type);
@@ -206,5 +289,6 @@ module.exports = {
   describeActions,
   welcomeResponse,
   planAgentRequest,
+  planAgentRequestStream,
   executeAgentAction,
 };

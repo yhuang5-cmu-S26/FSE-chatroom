@@ -30,6 +30,10 @@ function canHandoff(message) {
   return message.role === 'assistant' && message.planner?.intent === 'command' && !message.planner?.handoff?.requestedAt && ['pending', 'failed', 'rejected'].includes(message.planner?.approvalStatus);
 }
 
+function canRetry(message) {
+  return message.role === 'assistant' && message.planner?.approvalStatus === 'failed' && message.planner?.runId;
+}
+
 async function approve(message) {
   if (!canApprove(message) || loading.value) return;
   loading.value = true;
@@ -58,6 +62,18 @@ async function handoff(message) {
     loading.value = false;
     await scrollToLatest();
   }
+}
+
+async function retry(message) {
+  if (!canRetry(message) || loading.value) return;
+  loading.value = true;
+  try {
+    const result = await api.retryAgentRun(sessionId.value, message.planner.runId);
+    const updated = toUiMessage(result.message);
+    messages.value = messages.value.map((item) => item.id === updated.id ? updated : item);
+  } catch (error) {
+    messages.value.push({ id: `retry-error-${Date.now()}`, role: 'assistant', error: true, content: `重试失败：${error.message}` });
+  } finally { loading.value = false; await scrollToLatest(); }
 }
 
 async function refreshSessions() {
@@ -116,13 +132,22 @@ async function send(value = input.value) {
   loading.value = true;
   await scrollToLatest();
   try {
-    const result = await api.agentChat(content, sessionId.value);
-    messages.value.push({
-      ...toUiMessage(result.message),
+    const streaming = { id: `stream-${Date.now()}`, role: 'assistant', content: '' };
+    messages.value.push(streaming);
+    let completed = false;
+    await api.agentChatStream(content, sessionId.value, {
+      onDelta: (text) => { messages.value = messages.value.map((item) => item.id === streaming.id ? { ...item, content: item.content + text } : item); },
+      onResult: async (result) => {
+        completed = true;
+        const message = toUiMessage(result.message);
+        messages.value = messages.value.map((item) => item.id === streaming.id ? message : item);
+        sessionId.value = result.session.id;
+        await refreshSessions();
+      },
     });
-    sessionId.value = result.session.id;
-    await refreshSessions();
+    if (!completed) throw new Error('stream ended without a result');
   } catch (error) {
+    messages.value = messages.value.filter((item) => !String(item.id).startsWith('stream-'));
     messages.value.push({ id: `error-${Date.now()}`, role: 'assistant', error: true, content: `暂时无法生成计划：${error.message}` });
   } finally {
     loading.value = false;
@@ -169,6 +194,7 @@ async function send(value = input.value) {
             <small v-if="message.requiresConfirmation" class="agent-confirm">写操作将在确认后执行</small>
             <button v-if="canApprove(message)" type="button" class="agent-approve" :disabled="loading" @click="approve(message)">Approve 并执行</button>
             <button v-if="canHandoff(message)" type="button" class="agent-handoff" :disabled="loading" @click="handoff(message)">交由人工处理</button>
+            <button v-if="canRetry(message)" type="button" class="agent-handoff" :disabled="loading" @click="retry(message)">从失败步骤重试</button>
             <small v-if="message.planner?.approvalStatus === 'executed'" class="agent-executed">已执行{{ message.planner.execution?.steps?.length ? `（${message.planner.execution.steps.length} 步）` : '' }}</small>
             <small v-if="message.planner?.handoff?.requestedAt" class="agent-executed">已登记人工接管</small>
             <small v-if="message.planner?.approvalStatus === 'failed'" class="agent-coverage unsupported">执行失败，请查看步骤结果。</small>

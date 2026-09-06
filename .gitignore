@@ -3,7 +3,9 @@ frontend/node_modules/
 backend/node_modules/
 backend/tmp/mock-data/*.json
 backend/tmp/llm-session/*.json
+backend/tmp/workflow-data/*.json
 backend/tests/reports/*-latest.json
+.cert/
 
 # build outputs
 frontend/dist/

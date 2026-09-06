@@ -17,6 +17,7 @@ const apiLimiter = rateLimit({
   limit: 120,
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.get('x-internal-speed-test') === req.app.locals.speedTestInternalToken,
 });
 
 app.use(

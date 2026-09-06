@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { describeActions, planAgentRequest, executeAgentAction } = require('../../src/services/agentActions');
 const { getAgentPrompts } = require('../../src/services/promptRegistry');
+const { execute: executeTool } = require('../../src/services/agentTools');
 
 test('agent action contract loads action permissions from the Markdown manifest', async () => {
   const actions = await describeActions();
@@ -16,6 +17,43 @@ test('capability manifest, tool contract, and runtime handlers stay in sync', as
 test('validated read-only agent actions can execute through the tool registry', async () => {
   const result = await executeAgentAction({ type: 'post.draft', arguments: { topic: '寻人通知' } }, { role: 'user' });
   assert.match(result.data.draft, /寻人通知/);
+});
+
+test('post publishing is idempotent across a retried workflow step', async () => {
+  const posts = [];
+  const postModel = {
+    findOne: async ({ agentIdempotencyKey }) => posts.find((post) => post.agentIdempotencyKey === agentIdempotencyKey) || null,
+    create: async (input) => {
+      const post = { ...input, id: `post-${posts.length + 1}`, toObject: () => ({ ...post }) };
+      posts.push(post);
+      return post;
+    },
+  };
+  let broadcasts = 0;
+  const action = { type: 'post.publish', arguments: { content: '寻人通知' } };
+  const context = { idempotencyKey: 'run-1:step-2', postModel, io: { emit: () => { broadcasts += 1; } } };
+  await executeTool(action, { id: 'admin', name: 'Admin' }, context);
+  const retry = await executeTool(action, { id: 'admin', name: 'Admin' }, context);
+  assert.equal(posts.length, 1);
+  assert.equal(broadcasts, 1);
+  assert.equal(retry.data.idempotent, true);
+});
+
+test('streaming planner forwards reply deltas then validates the final plan', async () => {
+  const { planAgentRequestStream } = require('../../src/services/agentActions');
+  const original = { url: process.env.LLM_API_URL, key: process.env.LLM_API_KEY, model: process.env.LLM_MODEL };
+  process.env.LLM_API_URL = 'https://llm.example.test/chat/completions'; process.env.LLM_API_KEY = 'test-key'; process.env.LLM_MODEL = 'test-model';
+  const payload = JSON.stringify({ intent: 'conversation', reply: '你好，已收到。', todo: [], coverage: { canCover: true, reason: '普通对话。', unsupported: [] } });
+  const stream = new ReadableStream({ start(controller) {
+    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content: payload.slice(0, 35) } }] })}\n\n`));
+    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content: payload.slice(35) } }] })}\n\ndata: [DONE]\n\n`));
+    controller.close();
+  } });
+  const deltas = [];
+  const result = await planAgentRequestStream('你好', { role: 'user' }, { fetchImpl: async () => new Response(stream, { status: 200 }), onDelta: (text) => deltas.push(text) });
+  process.env.LLM_API_URL = original.url; process.env.LLM_API_KEY = original.key; process.env.LLM_MODEL = original.model;
+  assert.equal(result.intent, 'conversation');
+  assert.equal(deltas.join(''), '你好，已收到。');
 });
 
 test('empty agent input returns the capability overview without calling an LLM', async () => {

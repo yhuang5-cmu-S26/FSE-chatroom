@@ -1,6 +1,9 @@
 require('dotenv').config();
 
+const fs = require('node:fs');
 const http = require('http');
+const https = require('https');
+const { randomBytes } = require('node:crypto');
 const { Server } = require('socket.io');
 
 const app = require('./app');
@@ -12,7 +15,12 @@ async function startServer(options = {}) {
   await loadAgentPrompts();
   await connectDB();
 
-  const server = http.createServer(app);
+  const tlsKeyPath = process.env.TLS_KEY_PATH;
+  const tlsCertPath = process.env.TLS_CERT_PATH;
+  const tlsEnabled = Boolean(tlsKeyPath && tlsCertPath);
+  const server = tlsEnabled
+    ? https.createServer({ key: fs.readFileSync(tlsKeyPath), cert: fs.readFileSync(tlsCertPath) }, app)
+    : http.createServer(app);
   const io = new Server(server, {
     cors: {
       origin: process.env.CORS_ORIGIN || '*',
@@ -21,6 +29,7 @@ async function startServer(options = {}) {
   });
 
   app.locals.io = io;
+  app.locals.speedTestInternalToken = randomBytes(32).toString('hex');
   registerSocketHandlers(io);
 
   const port = options.port ?? (Number(process.env.PORT) || 3001);
@@ -29,7 +38,8 @@ async function startServer(options = {}) {
     server.once('error', reject);
     server.listen(port, host, resolve);
   });
-  console.log(`Backend listening on port ${server.address().port}`);
+  app.locals.speedTestTarget = `${tlsEnabled ? 'https' : 'http'}://127.0.0.1:${server.address().port}/api/health`;
+  console.log(`Backend listening on ${tlsEnabled ? 'https' : 'http'} port ${server.address().port}`);
   return { server, io };
 }
 

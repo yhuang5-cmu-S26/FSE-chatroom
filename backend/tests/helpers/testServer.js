@@ -21,6 +21,8 @@ async function startTestServer() {
   process.env.DB_DRIVER = 'json';
   process.env.JSON_DATA_DIR = seedStore();
   process.env.LLM_SESSION_DATA_DIR = path.join(process.env.JSON_DATA_DIR, 'llm-session');
+  process.env.AGENT_SESSION_DATA_DIR = process.env.LLM_SESSION_DATA_DIR;
+  process.env.WORKFLOW_DATA_DIR = path.join(process.env.JSON_DATA_DIR, 'workflow-data');
   process.env.JWT_SECRET = 'test-secret-at-least-32-characters';
   const { startServer } = require('../../src/server');
   const instance = await startServer({ port: 0, host: '127.0.0.1' });

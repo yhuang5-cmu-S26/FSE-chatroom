@@ -20,5 +20,5 @@ const agentSessionSchema = new mongoose.Schema(
 agentSessionSchema.index({ userId: 1, status: 1, lastMessageAt: -1 });
 
 module.exports = process.env.DB_DRIVER === 'json'
-  ? createJsonModel('sessions', { title: '新建协作会话', status: 'active' }, { dataDir: process.env.LLM_SESSION_DATA_DIR || path.resolve(__dirname, '../../tmp/llm-session') })
+  ? createJsonModel('sessions', { title: '新建协作会话', status: 'active' }, { dataDir: process.env.AGENT_SESSION_DATA_DIR || process.env.LLM_SESSION_DATA_DIR || path.resolve(__dirname, '../../tmp/llm-session') })
   : mongoose.model('AgentSession', agentSessionSchema);
