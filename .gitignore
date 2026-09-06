@@ -2,6 +2,8 @@
 frontend/node_modules/
 backend/node_modules/
 backend/tmp/mock-data/*.json
+backend/tmp/llm-session/*.json
+backend/tests/reports/*-latest.json
 
 # build outputs
 frontend/dist/

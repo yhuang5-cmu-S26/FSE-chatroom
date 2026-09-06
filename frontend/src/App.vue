@@ -2,9 +2,9 @@
 import { computed, onMounted, ref } from "vue";
 import { api, setToken } from "./services/api";
 import { connectSocket, emitAck, socket } from "./services/socket";
+import AgentChat from "./components/AgentChat.vue";
 const me = ref(),
     auth = ref({ name: "", email: "", password: "" }),
-    error = ref(""),
     view = ref("home"),
     users = ref([]),
     groups = ref([]),
@@ -13,16 +13,24 @@ const me = ref(),
     messages = ref([]),
     chat = ref({ mode: "public", targetId: "" }),
     text = ref(""),
-    run = ref();
+    run = ref(),
+    notice = ref(null);
+let noticeTimer;
 const admin = computed(() => me.value?.role === "admin");
+function showNotice(message, type = "success") {
+    notice.value = { message, type };
+    clearTimeout(noticeTimer);
+    noticeTimer = setTimeout(() => (notice.value = null), 3200);
+}
 async function enter() {
     try {
         const x = await api.enter(auth.value);
         setToken(x.token);
         me.value = x.user;
         connectSocket();
+        showNotice(x.created ? "注册并登录成功" : "登录成功");
     } catch (e) {
-        error.value = e.message;
+        showNotice(e.message, "error");
     }
 }
 async function open(mode, targetId = "") {
@@ -31,7 +39,7 @@ async function open(mode, targetId = "") {
         messages.value = (await emitAck("chat:open", chat.value)).messages;
         view.value = "chat";
     } catch (e) {
-        error.value = e.message;
+        showNotice(e.message, "error");
     }
 }
 async function send() {
@@ -44,7 +52,7 @@ async function send() {
             });
             text.value = "";
         } catch (e) {
-            error.value = e.message;
+            showNotice(e.message, "error");
         }
 }
 const pick = () =>
@@ -53,11 +61,49 @@ const pick = () =>
         .map((u) => u.id);
 async function task() {
     const title = prompt("签到任务标题");
-    if (title) await api.task({ title, assigneeIds: pick() });
+    if (!title) return;
+    try {
+        await api.task({ title, assigneeIds: pick() });
+        showNotice("签到任务已发布");
+    } catch (e) {
+        showNotice(e.message, "error");
+    }
 }
 async function group() {
     const name = prompt("群组名称");
-    if (name) await api.group({ name, memberIds: pick() });
+    if (!name) return;
+    try {
+        await api.group({ name, memberIds: pick() });
+        showNotice("群组已创建");
+    } catch (e) {
+        showNotice(e.message, "error");
+    }
+}
+async function post() {
+    const content = prompt("帖子内容");
+    if (!content) return;
+    try {
+        await api.post(content);
+        showNotice("帖子已发布");
+    } catch (e) {
+        showNotice(e.message, "error");
+    }
+}
+async function checkinTask(id) {
+    try {
+        await api.checkin(id);
+        showNotice("签到成功");
+    } catch (e) {
+        showNotice(e.message, "error");
+    }
+}
+async function startSpeedTest() {
+    try {
+        run.value = await api.speed({ concurrency: 10, durationSeconds: 10 });
+        showNotice("压测任务已启动");
+    } catch (e) {
+        showNotice(e.message, "error");
+    }
 }
 function logout() {
     setToken("");
@@ -100,9 +146,9 @@ onMounted(() => {
         </header>
         <section v-if="!me">
             <h1>社交网络</h1>
-            <p>首次邮箱自动注册；已有用户直接登录。</p>
-            <input v-model="auth.name" placeholder="姓名（首次必填）" /><input v-model="auth.email" placeholder="邮箱" /><input
-                v-model="auth.password" type="password" placeholder="密码（6 位以上）" /><button @click="enter">进入</button>
+            <p>已有用户名仅校验密码；新用户名需填写邮箱后自动注册。</p>
+            <input v-model="auth.name" placeholder="用户名" /><input v-model="auth.email" placeholder="邮箱（仅新用户必填）" /><input
+                v-model="auth.password" type="password" placeholder="密码（6 位以上）" /><button @click="enter">Sign in / Sign up</button>
         </section>
         <template v-else>
             <section v-if="view === 'home'">
@@ -139,7 +185,7 @@ onMounted(() => {
                     </p>
                 </div>
                 <div v-if="view === 'posts'">
-                    <button @click="api.post(prompt('帖子内容'))">发布帖子</button>
+                    <button @click="post">发布帖子</button>
                     <article v-for="p in posts" :key="p._id">
                         <b>{{ p.authorName }}</b>
                         <p>{{ p.content }}</p>
@@ -154,23 +200,20 @@ onMounted(() => {
                         <button v-if="
                             t.assigneeIds?.map(String).includes(me.id) &&
                             !t.checkedInUserIds?.map(String).includes(me.id)
-                        " @click="api.checkin(t.id || t._id)">
+                        " @click="checkinTask(t.id || t._id)">
                             签到
                         </button>
                     </article>
                 </div>
                 <div v-if="view === 'speed' && admin">
-                    <button @click="
-                        api
-                            .speed({ concurrency: 10, durationSeconds: 10 })
-                            .then((x) => (run = x))
-                        ">
+                    <button @click="startSpeedTest">
                         开始
                     </button>
                     <pre v-if="run">{{ run }}</pre>
                 </div>
             </section>
         </template>
-        <p class="error">{{ error }}</p>
+        <div v-if="notice" class="toast" :class="notice.type" role="status">{{ notice.message }}</div>
+        <AgentChat v-if="me" />
     </main>
 </template>

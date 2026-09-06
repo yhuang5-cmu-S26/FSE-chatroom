@@ -107,3 +107,28 @@ SOCKET_SEND_WINDOW_MS=10000
 cd backend
 npm run bench
 ```
+
+## 开发测试与指标
+
+```bash
+cd backend
+npm test                  # 权限、关系一致性、聊天授权与 Agent 契约
+npm run test:performance  # 隔离环境中的 API/Socket 延迟、吞吐与投递率
+npm run verify            # 后端测试 + 前端生产构建，并记录总耗时
+```
+
+报告输出到 `backend/tests/reports/`（已忽略，不提交运行时结果）。性能提升比例必须用相同机器、相同参数下的基线报告计算：
+
+```bash
+npm run test:performance:compare -- baseline.json current.json
+```
+
+本地 `verify` 耗时不能直接当作云端部署耗时；部署指标应由 CI/CD 平台记录。JSON mock 的性能结果也不能替代 MongoDB/Redis 生产环境压测。
+
+## Agent 会话历史
+
+Agent 使用 `AgentSession`（会话元数据）和 `AgentMessage`（独立消息）两张集合，按 `userId` 进行所有权隔离；消息以 `{ sessionId, createdAt }` 索引读取，避免将无限增长的历史嵌入单一文档。JSON Mock 位于 `backend/tmp/llm-session/`，MongoDB 模式下使用同名集合。
+
+- `GET /api/agent/sessions`：当前用户的会话列表
+- `GET /api/agent/sessions/:sessionId/messages`：当前用户的历史消息
+- `POST /api/agent/chat`：创建/续写会话，服务端读取最近历史后调用 Planner

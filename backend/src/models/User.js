@@ -4,6 +4,7 @@ const { createJsonModel } = require('../config/jsonModel');
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
+    usernameKey: { type: String, trim: true, lowercase: true, unique: true, sparse: true, index: true },
     email: { type: String, required: true, trim: true, lowercase: true, unique: true },
     passwordHash: { type: String, required: true },
     role: { type: String, enum: ['user', 'dispatcher', 'admin'], default: 'user', index: true },

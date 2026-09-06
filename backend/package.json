@@ -6,13 +6,18 @@
   "scripts": {
     "dev": "nodemon --ignore tmp/mock-data/ src/server.js",
     "start": "node src/server.js",
-    "test": "node --test",
-    "bench": "node scripts/benchmark.js"
+    "test": "node --test tests/integration/*.test.js tests/unit/*.test.js",
+    "test:context": "node --test tests/context/*.test.js",
+    "test:performance": "node tests/performance/benchmark.js",
+    "test:performance:compare": "node scripts/comparePerformance.js",
+    "verify": "node scripts/verify.js",
+    "bench": "node tests/performance/benchmark.js"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "ajv": "^8.20.0",
     "bcryptjs": "^2.4.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
@@ -23,6 +28,7 @@
     "socket.io": "^4.8.3"
   },
   "devDependencies": {
-    "nodemon": "^3.1.14"
+    "nodemon": "^3.1.14",
+    "socket.io-client": "^4.8.3"
   }
 }
