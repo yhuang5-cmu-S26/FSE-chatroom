@@ -33,6 +33,13 @@ function canRetry(message) {
   return message.role === 'assistant' && message.planner?.approvalStatus === 'failed' && message.planner?.runId;
 }
 
+function stepOutcome(step) {
+  if (step.status === 'failed') return step.error || '该步骤执行失败';
+  if (step.result?.summary) return step.result.summary;
+  if (step.result?.data?.absentUserIds) return `未签到人员：${step.result.data.absentUserIds.join('、') || '无'}`;
+  return step.status === 'executed' ? '已执行完成' : '等待执行';
+}
+
 async function approve(message) {
   if (!canApprove(message) || loading.value) return;
   loading.value = true;
@@ -216,11 +223,17 @@ async function send(value = input.value) {
               @click="handoff(message)">交由人工处理</button>
             <button v-if="canRetry(message)" type="button" class="agent-handoff" :disabled="loading"
               @click="retry(message)">从失败步骤重试</button>
+            <div v-if="message.planner?.execution?.steps?.length" class="agent-execution">
+              <strong>执行结果</strong>
+              <p v-for="step in message.planner.execution.steps" :key="step.id" :class="{ failed: step.status === 'failed' }">
+                <code>{{ step.status === 'failed' ? '失败' : '成功' }}</code>{{ stepOutcome(step) }}
+              </p>
+            </div>
             <small v-if="message.planner?.approvalStatus === 'executed'" class="agent-executed">已执行{{
               message.planner.execution?.steps?.length ? `（${message.planner.execution.steps.length} 步）` : '' }}</small>
             <small v-if="message.planner?.handoff?.requestedAt" class="agent-executed">已登记人工接管</small>
             <small v-if="message.planner?.approvalStatus === 'failed'"
-              class="agent-coverage unsupported">执行失败，请查看步骤结果。</small>
+              class="agent-coverage unsupported">执行失败；可修正参数后从失败步骤重试。</small>
           </article>
           <article v-if="loading" class="agent-message assistant agent-thinking">Agent 正在分析 Todo 与能力范围…</article>
         </div>

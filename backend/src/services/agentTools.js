@@ -4,7 +4,10 @@ const Post = require("../models/Post");
 const handlers = {
   "checkin.list_absentees": async (action) => {
     const task = await UserCheckin.findById(action.arguments.checkinId);
-    if (!task) throw new Error("check-in task not found");
+    if (!task)
+      throw new Error(
+        `签到任务“${action.arguments.checkinId}”不存在、已删除，或不是可查询的任务 ID`,
+      );
     const checkedIn = new Set((task.checkedInUserIds || []).map(String));
     const absentUserIds = (task.assigneeIds || [])
       .map(String)

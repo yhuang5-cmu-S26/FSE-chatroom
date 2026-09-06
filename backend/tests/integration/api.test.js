@@ -124,6 +124,30 @@ test('agent command plans execute only after their owner approves them', async (
   assert.equal(duplicate.status, 409);
 });
 
+test('approved check-in lookup reports a persisted failure when the task does not exist', async () => {
+  const user = await login(app.baseUrl, 'Demo User', 'user1234');
+  const headers = { 'content-type': 'application/json', authorization: `Bearer ${user.token}` };
+  const initial = await fetch(`${app.baseUrl}/api/agent/chat`, { method: 'POST', headers, body: JSON.stringify({ message: '' }) });
+  const { session } = await initial.json();
+  const AgentMessage = require('../../src/models/AgentMessage');
+  const plan = await AgentMessage.create({
+    sessionId: session.id, userId: user.user.id, role: 'assistant', content: '我会查询任务 A。',
+    planner: {
+      mode: 'llm-plan', intent: 'command', approvalStatus: 'pending',
+      todo: [{ id: 'lookup', title: '查询任务 A 未签到人员', action: { type: 'checkin.list_absentees', arguments: { checkinId: 'A' } }, status: 'planned' }],
+      coverage: { canCover: true, reason: '能力可覆盖。', unsupported: [] },
+    },
+  });
+  const response = await fetch(`${app.baseUrl}/api/agent/sessions/${session.id}/approve`, {
+    method: 'POST', headers, body: JSON.stringify({ messageId: plan.id }),
+  });
+  const body = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(body.message.planner.approvalStatus, 'failed');
+  assert.equal(body.message.planner.execution.steps[0].status, 'failed');
+  assert.match(body.message.planner.execution.steps[0].error, /签到任务“A”不存在/);
+});
+
 test('agent eval is admin-only and records an explicit human handoff', async () => {
   const user = await login(app.baseUrl, 'Demo User', 'user1234');
   const admin = await login(app.baseUrl, 'Admin', 'admin123');
