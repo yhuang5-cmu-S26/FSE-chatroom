@@ -1,8 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { describeActions, planAgentRequest, executeAgentAction } = require('../../src/services/agentActions');
+const { describeActions, planAgentRequest, executeAgentAction } = require('../../src/services/agent/planner');
 const { getAgentPrompts } = require('../../src/services/promptRegistry');
-const { execute: executeTool } = require('../../src/services/agentTools');
+const { execute: executeTool } = require('../../src/services/agent/tools/local');
 
 test('agent action contract loads action permissions from the Markdown manifest', async () => {
   const actions = await describeActions();
@@ -40,7 +40,7 @@ test('post publishing is idempotent across a retried workflow step', async () =>
 });
 
 test('streaming planner forwards reply deltas then validates the final plan', async () => {
-  const { planAgentRequestStream } = require('../../src/services/agentActions');
+  const { planAgentRequestStream } = require('../../src/services/agent/planner');
   const original = { url: process.env.LLM_API_URL, key: process.env.LLM_API_KEY, model: process.env.LLM_MODEL };
   process.env.LLM_API_URL = 'https://llm.example.test/chat/completions'; process.env.LLM_API_KEY = 'test-key'; process.env.LLM_MODEL = 'test-model';
   const payload = JSON.stringify({ intent: 'conversation', reply: '你好，已收到。', todo: [], coverage: { canCover: true, reason: '普通对话。', unsupported: [] } });

@@ -37,6 +37,17 @@ const agentMessageSchema = new mongoose.Schema(
         },
       ],
       coverage: { canCover: Boolean, reason: String, unsupported: [String] },
+      weatherAlert: {
+        evaluateForPost: { type: Boolean, default: false },
+        sourceStepId: String,
+        decision: {
+          shouldPublish: Boolean,
+          reason: String,
+          evidence: mongoose.Schema.Types.Mixed,
+          post: { title: String, content: String },
+        },
+        followUpApproval: { requestedAt: Date, reason: String },
+      },
       requiresConfirmation: Boolean,
       approvalStatus: {
         type: String,

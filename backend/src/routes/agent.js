@@ -1,11 +1,13 @@
 const express = require("express");
 const { authenticate, authorize } = require("../middleware/auth");
 const {
-  planAgentRequest,
-  planAgentRequestStream,
   welcomeResponse,
-  executeAgentAction,
-} = require("../services/agentActions");
+} = require("../services/agent/planner");
+const {
+  executeApprovedAgentWorkflow,
+  planAgentWorkflow,
+  planAgentWorkflowStream,
+} = require("../services/agent/workflow");
 const {
   createSession,
   resolveSession,
@@ -17,24 +19,20 @@ const {
   getOwnedMessage,
   serializeSession,
   serializeMessage,
-} = require("../services/agentSessions");
+} = require("../services/agent/sessions");
 const AgentMessage = require("../models/AgentMessage");
 const {
   evaluateAgentMessages,
-  classifyError,
-} = require("../services/agentEvaluation");
+} = require("../services/agent/evaluation");
 const WorkflowRun = require("../models/WorkflowRun");
 const {
   createRun,
   getRun,
   approveRun,
-  startStep,
-  completeStep,
-  finishRun,
   retryRun,
   handoffRun,
   getRunDetail,
-} = require("../services/workflowState");
+} = require("../services/workflow/state");
 
 const router = express.Router();
 router.use(authenticate);
@@ -57,71 +55,6 @@ async function ensureWorkflowRun(message, session, userId) {
   return run;
 }
 
-// workflow breakdown point response to the client
-// then continue executing the remaining steps in the background
-async function executeRemainingSteps(message, run, actor, io) {
-  const byId = new Map(
-    (message.planner.execution?.steps || []).map((step) => [step.id, step]),
-  );
-  for (const [sequence, step] of message.planner.todo.entries()) {
-    if (step.status === "executed") continue;
-    let persisted;
-    try {
-      persisted = await startStep(run, sequence);
-      const result = await executeAgentAction(step.action, actor, {
-        io,
-        idempotencyKey: `${run.id}:${persisted.step.id}`,
-      });
-      step.status = "executed";
-      await completeStep(run, persisted.step, persisted.toolCall, result);
-      byId.set(step.id, { id: step.id, status: "executed", result });
-    } catch (error) {
-      step.status = "failed";
-      if (persisted)
-        await completeStep(
-          run,
-          persisted.step,
-          persisted.toolCall,
-          null,
-          error,
-          classifyError(error.message),
-        );
-      byId.set(step.id, {
-        id: step.id,
-        status: "failed",
-        error: error.message,
-        errorType: classifyError(error.message),
-      });
-      const failed = true;
-      message.planner.approvalStatus = "failed";
-      message.planner.execution = {
-        status: "failed",
-        steps: message.planner.todo
-          .map((item) => byId.get(item.id))
-          .filter(Boolean),
-        completedAt: new Date(),
-      };
-      await finishRun(run, failed);
-      if (typeof message.markModified === "function")
-        message.markModified("planner");
-      await message.save();
-      return false;
-    }
-  }
-  message.planner.approvalStatus = "executed";
-  message.planner.execution = {
-    status: "executed",
-    steps: message.planner.todo
-      .map((item) => byId.get(item.id))
-      .filter(Boolean),
-    completedAt: new Date(),
-  };
-  await finishRun(run, false);
-  if (typeof message.markModified === "function")
-    message.markModified("planner");
-  await message.save();
-  return true;
-}
 router.get("/sessions", async (req, res, next) => {
   try {
     res.json({ sessions: await listSessions(req.user.id) });
@@ -180,9 +113,9 @@ router.post("/chat/stream", async (req, res) => {
       typeof req.body.message === "string" ? req.body.message.trim() : "";
     if (!input) throw new Error("message is required");
     const history = await promptHistory(session.id, req.user.id);
-    console.log('Agent conversation history retrieval has been finished.');
+    console.log("Agent conversation history retrieval has been finished.");
     await appendMessage(session, req.user.id, { role: "user", content: input });
-    const result = await planAgentRequestStream(input, req.user, {
+    const result = await planAgentWorkflowStream(input, req.user, {
       history,
       onDelta: (text) => writeSse(res, "delta", { text }),
     });
@@ -200,6 +133,7 @@ router.post("/chat/stream", async (req, res) => {
         intent: result.intent,
         todo: result.todo,
         coverage: result.coverage,
+        weatherAlert: result.weatherAlert,
         requiresConfirmation: result.requiresConfirmation,
         approvalStatus,
         model: process.env.LLM_MODEL || "",
@@ -265,9 +199,9 @@ router.post("/chat", async (req, res, next) => {
       });
     }
     const history = await promptHistory(session.id, req.user.id);
-    console.log('Agent conversation history retrieval has been finished.');
+    console.log("Agent conversation history retrieval has been finished.");
     await appendMessage(session, req.user.id, { role: "user", content: input });
-    const result = await planAgentRequest(input, req.user, { history });
+    const result = await planAgentWorkflow(input, req.user, { history });
     const approvalStatus =
       result.intent === "command"
         ? result.coverage.canCover
@@ -282,6 +216,7 @@ router.post("/chat", async (req, res, next) => {
         intent: result.intent,
         todo: result.todo,
         coverage: result.coverage,
+        weatherAlert: result.weatherAlert,
         requiresConfirmation: result.requiresConfirmation,
         approvalStatus,
         model: process.env.LLM_MODEL || "",
@@ -378,7 +313,12 @@ router.post("/sessions/:sessionId/approve", async (req, res, next) => {
         .json({ error: "workflow run is not awaiting approval" });
     message.planner.approvalStatus = "approved";
     await approveRun(run, { messageId: message.id, userId: req.user.id });
-    await executeRemainingSteps(message, run, req.user, req.app.locals.io);
+    await executeApprovedAgentWorkflow({
+      message,
+      run,
+      actor: req.user,
+      io: req.app.locals.io,
+    });
     return res.json({ message: serializeMessage(message) });
   } catch (error) {
     return next(error);
@@ -402,7 +342,12 @@ router.post(
         return res.status(409).json({ error: "workflow run is not retryable" });
       await retryRun(run);
       message.planner.approvalStatus = "approved";
-      await executeRemainingSteps(message, run, req.user, req.app.locals.io);
+      await executeApprovedAgentWorkflow({
+        message,
+        run,
+        actor: req.user,
+        io: req.app.locals.io,
+      });
       return res.json({ message: serializeMessage(message) });
     } catch (error) {
       return next(error);

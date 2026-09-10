@@ -1,8 +1,10 @@
+/** Normalizes persisted timestamps before Agent observability metrics are calculated. */
 function asDate(value) {
   const date = value ? new Date(value) : null;
   return date && !Number.isNaN(date.getTime()) ? date : null;
 }
 
+/** Maps execution failures to stable categories for the Agent evaluation dashboard. */
 function classifyError(error = '') {
   const text = String(error).toLowerCase();
   if (/forbidden|permission|权限|admin/.test(text)) return 'authorization';
@@ -11,10 +13,12 @@ function classifyError(error = '') {
   return 'tool_failure';
 }
 
+/** Produces a safe, rounded metric ratio for Agent workflow reporting. */
 function ratio(numerator, denominator) {
   return denominator ? Number((numerator / denominator).toFixed(4)) : null;
 }
 
+/** Aggregates plan, execution, handoff, latency, and error metrics. Feature: Agent reliability evaluation. */
 function evaluateAgentMessages(messages) {
   const plans = (Array.isArray(messages) ? messages : [])
     .map((message) => message.toObject?.() || message)

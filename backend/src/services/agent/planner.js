@@ -1,6 +1,7 @@
-const { getAgentPrompts } = require("./promptRegistry");
-const { getActionRoute, isActionEnabled } = require("../config/mcp");
+const { getAgentPrompts } = require("../promptRegistry");
+const { getActionRoute, isActionEnabled } = require("../../config/mcp");
 
+/** Returns UI-safe capability metadata for the Agent capability-overview feature. */
 async function describeActions() {
   const { capabilities } = await getAgentPrompts();
   return capabilities.map(
@@ -14,6 +15,7 @@ async function describeActions() {
   );
 }
 
+/** Builds the no-input response used by the Agent chat onboarding feature. */
 async function welcomeResponse(actor) {
   const { capabilities } = await getAgentPrompts();
   return {
@@ -39,10 +41,12 @@ async function welcomeResponse(actor) {
   };
 }
 
+/** Composes the constrained planner prompt for the LLM planning feature. */
 function buildSystemPrompt(config, actor) {
   return `${config.systemPrompt}\n\n## Runtime capability manifest\n${JSON.stringify(config.capabilities)}\n\n## Tool contract\n${config.toolsMarkdown}\n\n## Action protocol\n${config.protocolMarkdown}\n\nActor role: ${actor?.role || "user"}. Return JSON only.`;
 }
 
+/** Parses an LLM JSON response, accepting optional Markdown fences for provider compatibility. */
 function parseModelJson(content) {
   const text = typeof content === "string" ? content.trim() : "";
   return JSON.parse(
@@ -50,6 +54,7 @@ function parseModelJson(content) {
   );
 }
 
+/** Creates the OpenAI-compatible request body for the Agent planning feature. */
 function modelRequestBody(config, actor, history, input, stream = false) {
   const body = {
     model: process.env.LLM_MODEL,
@@ -73,6 +78,7 @@ function modelRequestBody(config, actor, history, input, stream = false) {
   return body;
 }
 
+/** Extracts the completed reply prefix from streamed plan JSON for the SSE chat feature. */
 function replyFromPartialJson(text) {
   const match = /"reply"\s*:\s*"/.exec(text);
   if (!match) return "";
@@ -99,17 +105,24 @@ function replyFromPartialJson(text) {
     .replace(/\\\\/g, "\\");
 }
 
+/** Converts JSON Schema errors into a diagnosable planner-contract error. */
 function validationError(errors) {
   return new Error(
     `LLM plan violates JSON Action protocol: ${(errors || []).map((item) => `${item.instancePath || "/"} ${item.message}`).join("; ")}`,
   );
 }
 
+/**
+ * Validates an LLM plan against JSON Schema, capability allowlists and RBAC.
+ * Feature: safe, approval-gated Agent action planning.
+ */
 function validatePlan(candidate, actor, config) {
   if (!config.validatePlan(candidate))
     throw validationError(config.validatePlan.errors);
   if (candidate.intent === "conversation") {
-    console.log('Agent response JSON parsing and Todo validation has been finished.');
+    console.log(
+      "Agent response JSON parsing and Todo validation has been finished.",
+    );
     return {
       reply: candidate.reply,
       intent: "conversation",
@@ -119,11 +132,15 @@ function validatePlan(candidate, actor, config) {
         reason: candidate.coverage.reason,
         unsupported: [],
       },
+      weatherAlert: { evaluateForPost: false },
       requiresConfirmation: false,
       mode: "llm-conversation",
     };
   }
   const rejections = [];
+  const weatherAlert = {
+    evaluateForPost: Boolean(candidate.weatherAlert?.evaluateForPost),
+  };
   const todo = candidate.todo.map((item) => {
     const capability = config.capabilityByAction.get(item.action.type);
     let rejectionReason = "";
@@ -152,12 +169,15 @@ function validatePlan(candidate, actor, config) {
   ];
   const canCover =
     Boolean(candidate.coverage.canCover) && unsupported.length === 0;
-  console.log('Agent response JSON parsing and Todo validation has been finished.');
+  console.log(
+    "Agent response JSON parsing and Todo validation has been finished.",
+  );
   return {
     reply: candidate.reply,
     intent: "command",
     todo,
     coverage: { canCover, reason: candidate.coverage.reason, unsupported },
+    weatherAlert,
     requiresConfirmation: todo.some(
       (item) => item.requiresConfirmation && item.status === "planned",
     ),
@@ -165,6 +185,7 @@ function validatePlan(candidate, actor, config) {
   };
 }
 
+/** Bounds persisted conversation history before it enters the planner context window. */
 function sanitizeHistory(history) {
   if (!Array.isArray(history)) return [];
   return history.flatMap((item) => {
@@ -178,6 +199,10 @@ function sanitizeHistory(history) {
   });
 }
 
+/**
+ * Calls the model once and returns a validated non-streaming plan or conversation reply.
+ * Feature: standard Agent chat planning.
+ */
 async function planAgentRequest(
   message,
   actor,
@@ -211,7 +236,7 @@ async function planAgentRequest(
   );
   try {
     const body = modelRequestBody(config, actor, history, input);
-    console.log('Agent LLM request assembly has been finished.');
+    console.log("Agent LLM request assembly has been finished.");
     const response = await fetchImpl(url, {
       method: "POST",
       signal: controller.signal,
@@ -233,6 +258,10 @@ async function planAgentRequest(
   }
 }
 
+/**
+ * Streams reply text to SSE while retaining the final JSON plan for validation.
+ * Feature: streaming Agent chat planning.
+ */
 async function planAgentRequestStream(
   message,
   actor,
@@ -248,7 +277,7 @@ async function planAgentRequestStream(
     return planAgentRequest(input, actor, { fetchImpl, history });
   const config = await getAgentPrompts();
   const body = modelRequestBody(config, actor, history, input, true);
-  console.log('Agent LLM request assembly has been finished.');
+  console.log("Agent LLM request assembly has been finished.");
   const response = await fetchImpl(url, {
     method: "POST",
     headers: {
@@ -286,6 +315,10 @@ async function planAgentRequestStream(
   return validatePlan(parseModelJson(content), actor, config);
 }
 
+/**
+ * Revalidates an approved action and routes it to an internal Tool or MCP adapter.
+ * Feature: safe execution boundary for Agent workflows.
+ */
 async function executeAgentAction(action, actor, context = {}) {
   const { capabilityByAction } = await getAgentPrompts();
   const capability = capabilityByAction.get(action?.type);
@@ -295,8 +328,8 @@ async function executeAgentAction(action, actor, context = {}) {
   if (capability.requiredRole && capability.requiredRole !== actor?.role)
     throw new Error(`forbidden action: ${action.type}`);
   return getActionRoute(action.type)
-    ? require("./mcp/agentMCPTools").executeActions(action, actor, context)
-    : require("./agentTools").execute(action, actor, context);
+    ? require("./tools/mcp").executeActions(action, actor, context)
+    : require("./tools/local").execute(action, actor, context);
 }
 module.exports = {
   describeActions,

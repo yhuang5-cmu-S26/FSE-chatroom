@@ -1,6 +1,10 @@
-const UserCheckin = require("../models/UserCheckin");
-const Post = require("../models/Post");
+const UserCheckin = require("../../../models/UserCheckin");
+const Post = require("../../../models/Post");
 
+/**
+ * Local business Tool implementations.
+ * Feature: the Agent can query application data and publish posts without direct model access to the database.
+ */
 const handlers = {
   "checkin.list_absentees": async (action) => {
     const task = await UserCheckin.findById(action.arguments.checkinId);
@@ -72,6 +76,7 @@ const handlers = {
 
 const registeredActions = new Set(Object.keys(handlers));
 
+/** Dispatches an approved action to a local business handler. Feature: internal Agent Tool execution. */
 async function execute(action, actor, context = {}) {
   const handler = handlers[action.type];
   if (!handler)

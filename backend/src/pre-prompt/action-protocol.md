@@ -41,6 +41,14 @@ The Planner output must match the following JSON Schema. Each `todo[].action.typ
         "reason": { "type": "string", "minLength": 1, "maxLength": 600 },
         "unsupported": { "type": "array", "items": { "type": "string", "maxLength": 300 }, "maxItems": 8 }
       }
+    },
+    "weatherAlert": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evaluateForPost"],
+      "properties": {
+        "evaluateForPost": { "type": "boolean" }
+      }
     }
   },
   "allOf": [
@@ -51,6 +59,28 @@ The Planner output must match the following JSON Schema. Each `todo[].action.typ
     {
       "if": { "properties": { "intent": { "const": "command" } } },
       "then": { "properties": { "todo": { "minItems": 1 } } }
+    },
+    {
+      "if": {
+        "required": ["weatherAlert"],
+        "properties": { "weatherAlert": { "properties": { "evaluateForPost": { "const": true } } } }
+      },
+      "then": {
+        "properties": {
+          "intent": { "const": "command" },
+          "todo": {
+            "minItems": 1,
+            "maxItems": 1,
+            "items": {
+              "properties": {
+                "action": {
+                  "properties": { "type": { "const": "mcp.weather.forecast" } }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

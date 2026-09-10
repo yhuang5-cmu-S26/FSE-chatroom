@@ -1,5 +1,6 @@
 const { getMcpServer } = require("../../config/mcp");
 
+/** Applies a bounded timeout to MCP connection and Tool calls. Feature: resilient external integrations. */
 function withTimeout(promise, timeoutMs, label) {
   let timer;
   return Promise.race([
@@ -13,15 +14,17 @@ function withTimeout(promise, timeoutMs, label) {
   ]).finally(() => clearTimeout(timer));
 }
 
-// Client call external MCP tool via HTTP transport
+/**
+ * Connects to a configured Streamable HTTP MCP server, invokes one Tool, and closes the client.
+ * Feature: controlled external capability access for the Agent.
+ */
 async function callMcpTool(serverName, toolName, args) {
   const config = getMcpServer(serverName);
   if (!config?.url)
     throw new Error(`MCP server ${serverName} is not configured`);
   const { Client, StreamableHTTPClientTransport } =
     await import("@modelcontextprotocol/client");
-  // This is where we create a transport for the MCP client to communicate with the MCP server over HTTP.
-  // The transport is configured with the server URL and optional authorization headers if a token is provided in the configuration.
+  // Streamable HTTP keeps external credentials and protocol details outside Agent Tool handlers.
   const transport = new StreamableHTTPClientTransport(new URL(config.url), {
     requestInit: {
       headers: config.token ? { authorization: `Bearer ${config.token}` } : {},

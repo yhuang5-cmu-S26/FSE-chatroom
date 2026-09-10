@@ -1,6 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { evaluateAgentMessages } = require('../../src/services/agentEvaluation');
+const { evaluateAgentMessages } = require('../../src/services/agent/evaluation');
 
 test('agent evaluation aggregates workflow outcomes, tools, timing, and errors', () => {
   const messages = [

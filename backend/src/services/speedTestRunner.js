@@ -1,12 +1,14 @@
 const http = require('node:http');
 const https = require('node:https');
 
+/** Calculates a latency percentile for the local API performance benchmark feature. */
 function percentile(values, ratio) {
   if (!values.length) return null;
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)];
 }
 
+/** Sends one authenticated health request and measures its latency. Feature: local API benchmark. */
 function requestHealth(url, internalToken) {
   return new Promise((resolve, reject) => {
     const client = url.startsWith('https:') ? https : http;
@@ -20,6 +22,7 @@ function requestHealth(url, internalToken) {
   });
 }
 
+/** Runs concurrent local health checks and returns throughput plus latency percentiles. Feature: API performance observability. */
 async function runLocalHttpBenchmark({ targetUrl, internalToken, concurrency, durationSeconds, requestImpl = requestHealth }) {
   const deadline = performance.now() + durationSeconds * 1000;
   const latencies = [];
