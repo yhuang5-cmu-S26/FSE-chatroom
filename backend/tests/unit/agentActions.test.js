@@ -19,6 +19,16 @@ test('validated read-only agent actions can execute through the tool registry', 
   assert.match(result.data.draft, /寻人通知/);
 });
 
+test('write actions cannot bypass the workflow approval boundary', async () => {
+  await assert.rejects(
+    executeAgentAction(
+      { type: 'post.publish', arguments: { content: '未经逐调用审批的公告' } },
+      { id: 'admin-direct', role: 'admin' },
+    ),
+    /requires a current approval/,
+  );
+});
+
 test('post publishing is idempotent across a retried workflow step', async () => {
   const posts = [];
   const postModel = {
@@ -46,13 +56,14 @@ test('streaming planner forwards reply deltas then validates the final plan', as
   const payload = JSON.stringify({ intent: 'conversation', reply: '你好，已收到。', todo: [], coverage: { canCover: true, reason: '普通对话。', unsupported: [] } });
   const stream = new ReadableStream({ start(controller) {
     controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content: payload.slice(0, 35) } }] })}\n\n`));
-    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content: payload.slice(35) } }] })}\n\ndata: [DONE]\n\n`));
+    controller.enqueue(new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content: payload.slice(35) } }] })}\n\ndata: ${JSON.stringify({ choices: [], usage: { prompt_tokens: 40, completion_tokens: 12, total_tokens: 52 } })}\n\ndata: [DONE]\n\n`));
     controller.close();
   } });
   const deltas = [];
   const result = await planAgentRequestStream('你好', { role: 'user' }, { fetchImpl: async () => new Response(stream, { status: 200 }), onDelta: (text) => deltas.push(text) });
   process.env.LLM_API_URL = original.url; process.env.LLM_API_KEY = original.key; process.env.LLM_MODEL = original.model;
   assert.equal(result.intent, 'conversation');
+  assert.deepEqual(result.usage, { promptTokens: 40, completionTokens: 12, totalTokens: 52 });
   assert.equal(deltas.join(''), '你好，已收到。');
 });
 
@@ -75,13 +86,14 @@ test('agent planner validates remote LLM todo output before returning it', async
       { id: 'three', title: '发布寻人帖', action: { type: 'post.publish', arguments: { content: '请联系调度员。' } } },
     ],
     coverage: { canCover: true, reason: '所有步骤都有对应能力。', unsupported: [] },
-  }) } }] }), { status: 200 });
+  }) } }], usage: { prompt_tokens: 120, completion_tokens: 30, total_tokens: 150 } }), { status: 200 });
   const plan = await planAgentRequest('根据未签到人员发布寻人帖', { role: 'admin' }, { fetchImpl });
   process.env.LLM_API_URL = original.url;
   process.env.LLM_API_KEY = original.key;
   process.env.LLM_MODEL = original.model;
   assert.equal(plan.requiresConfirmation, true);
   assert.equal(plan.coverage.canCover, true);
+  assert.deepEqual(plan.usage, { promptTokens: 120, completionTokens: 30, totalTokens: 150 });
   assert.deepEqual(plan.todo.map((step) => step.action.type), ['checkin.list_absentees', 'post.draft', 'post.publish']);
 });
 

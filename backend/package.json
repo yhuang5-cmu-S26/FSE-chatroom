@@ -8,6 +8,8 @@
     "start": "node src/server.js",
     "test": "node --test tests/integration/*.test.js tests/unit/*.test.js",
     "test:context": "node --test tests/context/*.test.js",
+    "test:agent-eval": "node --test tests/agent-evaluation/*.test.js",
+    "eval:agent": "node tests/agent-evaluation/run.js",
     "test:performance": "node tests/performance/benchmark.js",
     "test:performance:compare": "node scripts/comparePerformance.js",
     "verify": "node scripts/verify.js",

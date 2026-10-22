@@ -3,6 +3,10 @@ const WorkflowStep = require("../../models/WorkflowStep");
 const ToolCall = require("../../models/ToolCall");
 const Approval = require("../../models/Approval");
 const WorkflowEvent = require("../../models/WorkflowEvent");
+const {
+  workflowCheckpointer,
+  workflowThreadId,
+} = require("./checkpointer");
 
 /** Converts a Mongoose document to a plain value for workflow detail responses. */
 const value = (document) => document?.toObject?.() || document;
@@ -92,6 +96,145 @@ async function startStep(run, sequence) {
   return { step, toolCall };
 }
 
+/** Loads the durable step used to bind an approval to one exact execution target. */
+async function getWorkflowStep(run, sequence) {
+  const step = await WorkflowStep.findOne({ runId: run.id, sequence });
+  if (!step) throw new Error(`workflow step ${sequence} not found`);
+  return step;
+}
+
+/** 在工具启动前持久化用户对参数的修改，保证审计输入与实际执行一致。 */
+async function updateStepAction(run, sequence, action) {
+  const step = await WorkflowStep.findOne({ runId: run.id, sequence });
+  if (!step) throw new Error(`workflow step ${sequence} not found`);
+  if (step.state !== "planned")
+    throw new Error(`workflow step ${sequence} is not editable`);
+  step.action = action;
+  if (typeof step.markModified === "function") step.markModified("action");
+  await step.save();
+  return step;
+}
+
+/** 在副作用执行前记录 Graph 已暂停并等待用户输入。 */
+async function requestHumanInput(run, message, payload) {
+  if (run.state !== "awaiting_input") {
+    run.state = "awaiting_input";
+    run.completedAt = null;
+    await run.save();
+    await appendEvent(run, "human_input.requested", {
+      kind: payload.kind,
+      stepId: payload.stepId,
+      actionType: payload.actionType,
+      actionDigest: payload.actionDigest,
+      riskLevel: payload.riskLevel,
+      expiresAt: payload.expiresAt,
+    });
+  }
+  message.planner.approvalStatus = "awaiting_input";
+  message.planner.execution = {
+    ...(message.planner.execution || {}),
+    status: "awaiting_input",
+    interrupt: payload,
+    steps: message.planner.execution?.steps || [],
+  };
+  if (typeof message.markModified === "function")
+    message.markModified("planner");
+  await message.save();
+}
+
+/** 记录用户回复并把运行状态切回 running，再由 Command(resume) 继续执行。 */
+async function acceptHumanInput(run, message, response, approval = {}) {
+  run.state = "running";
+  await run.save();
+  message.planner.approvalStatus = "approved";
+  message.planner.execution = {
+    ...(message.planner.execution || {}),
+    status: "running",
+    interrupt: null,
+  };
+  if (typeof message.markModified === "function")
+    message.markModified("planner");
+  await message.save();
+  await Approval.create({
+    runId: run.id,
+    messageId: message.id,
+    userId: run.userId,
+    stepId: approval.stepId,
+    actionType: approval.actionType,
+    actionDigest: approval.actionDigest,
+    decision: "tool_approved",
+    reason: response.decision === "edit" ? "参数由审批人修改后批准" : "",
+    expiresAt: approval.expiresAt,
+    decidedAt: new Date(),
+  });
+  await appendEvent(run, "human_input.received", {
+    decision: response.decision,
+    contentChanged: response.decision === "edit",
+    stepId: approval.stepId,
+    actionType: approval.actionType,
+    actionDigest: approval.actionDigest,
+  });
+}
+
+/** Persists an explicit human denial; rejection is terminal and never dispatches a tool. */
+async function rejectHumanInput(run, message, response, approval = {}) {
+  await Approval.create({
+    runId: run.id,
+    messageId: message.id,
+    userId: run.userId,
+    stepId: approval.stepId,
+    actionType: approval.actionType,
+    actionDigest: approval.actionDigest,
+    decision: "tool_rejected",
+    reason: response.reason || "用户拒绝执行危险工具",
+    expiresAt: approval.expiresAt,
+    decidedAt: new Date(),
+  });
+  message.planner.approvalStatus = "rejected";
+  message.planner.execution = {
+    ...(message.planner.execution || {}),
+    status: "rejected",
+    interrupt: null,
+  };
+  if (typeof message.markModified === "function")
+    message.markModified("planner");
+  await message.save();
+  await appendEvent(run, "human_input.rejected", {
+    stepId: approval.stepId,
+    actionType: approval.actionType,
+    actionDigest: approval.actionDigest,
+    reason: response.reason || "用户拒绝执行危险工具",
+  });
+}
+
+/** Marks a never-dispatched step rejected without creating a misleading ToolCall. */
+async function rejectStep(run, sequence, reason, errorType) {
+  const step = await getWorkflowStep(run, sequence);
+  if (step.state === "rejected") return step;
+  if (step.state !== "planned") return step;
+  step.state = "rejected";
+  step.error = String(reason || "tool execution rejected").slice(0, 1000);
+  step.errorType = errorType;
+  step.completedAt = new Date();
+  await step.save();
+  await appendEvent(run, "tool.rejected", {
+    sequence,
+    actionType: step.action.type,
+    errorType,
+  });
+  return step;
+}
+
+/** Moves a policy- or human-rejected run to an idempotent terminal state. */
+async function rejectRun(run, reason, errorType) {
+  if (run.state === "rejected") return run;
+  run.state = "rejected";
+  run.completedAt = new Date();
+  await run.save();
+  await appendEvent(run, "run.rejected", { reason, errorType });
+  return run;
+}
+
 /** Persists a ToolCall outcome on both its step and audit record. Feature: workflow execution tracing. */
 async function completeStep(
   run,
@@ -179,6 +322,7 @@ async function handoffRun(run, { messageId, userId, reason = "" }) {
   run.completedAt = new Date();
   await run.save();
   await appendEvent(run, "run.handed_off", { reason });
+  await workflowCheckpointer.deleteThread(workflowThreadId(run.id, userId));
 }
 
 /** Assembles the run, steps, calls, approvals, and events for workflow audit views. */
@@ -195,8 +339,10 @@ async function getRunDetail(run) {
 /** Deletes only idle workflow records for a session. Feature: safe Agent session deletion. */
 async function deleteWorkflowStateForSession(sessionId, userId) {
   const runs = await WorkflowRun.find({ sessionId, userId }).lean();
-  if (runs.some((run) => run.state === "running")) {
-    const error = new Error("cannot delete a session with a running workflow");
+  if (
+    runs.some((run) => ["running", "awaiting_input"].includes(run.state))
+  ) {
+    const error = new Error("cannot delete a session with an active workflow");
     error.status = 409;
     throw error;
   }
@@ -211,6 +357,13 @@ async function deleteWorkflowStateForSession(sessionId, userId) {
       ];
     }),
   );
+  await Promise.all(
+    runs.map((run) =>
+      workflowCheckpointer.deleteThread(
+        workflowThreadId(String(run._id || run.id), userId),
+      ),
+    ),
+  );
   await WorkflowRun.deleteMany({ sessionId, userId });
   return { deletedRunCount: runs.length };
 }
@@ -219,7 +372,14 @@ module.exports = {
   createRun,
   getRun,
   approveRun,
+  acceptHumanInput,
+  rejectHumanInput,
   startStep,
+  getWorkflowStep,
+  updateStepAction,
+  requestHumanInput,
+  rejectStep,
+  rejectRun,
   completeStep,
   finishRun,
   appendConditionalPostStep,

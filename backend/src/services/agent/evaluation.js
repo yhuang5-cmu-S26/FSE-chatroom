@@ -18,6 +18,21 @@ function ratio(numerator, denominator) {
   return denominator ? Number((numerator / denominator).toFixed(4)) : null;
 }
 
+/** Uses nearest-rank percentiles so dashboard values are easy to reproduce. */
+function percentile(values, percentage) {
+  const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
+  if (!sorted.length) return null;
+  const rank = Math.max(0, Math.ceil((percentage / 100) * sorted.length) - 1);
+  return sorted[rank];
+}
+
+function average(values) {
+  const samples = values.filter(Number.isFinite);
+  return samples.length
+    ? Math.round(samples.reduce((sum, value) => sum + value, 0) / samples.length)
+    : null;
+}
+
 /** Aggregates plan, execution, handoff, latency, and error metrics. Feature: Agent reliability evaluation. */
 function evaluateAgentMessages(messages) {
   const plans = (Array.isArray(messages) ? messages : [])
@@ -48,6 +63,25 @@ function evaluateAgentMessages(messages) {
     const completedAt = asDate(message.planner.execution?.completedAt);
     return requestedAt && completedAt ? [completedAt.getTime() - requestedAt.getTime()] : [];
   }).filter((value) => value >= 0);
+  const planningDurations = plans
+    .map((message) => Number(message.planner.planningLatencyMs))
+    .filter((value) => Number.isFinite(value) && value >= 0);
+  const usageSamples = plans
+    .map((message) => message.planner.usage)
+    .filter((usage) =>
+      [usage?.promptTokens, usage?.completionTokens, usage?.totalTokens].every(
+        (value) => Number.isFinite(Number(value)) && Number(value) >= 0,
+      ),
+    );
+  const tokenUsage = usageSamples.reduce(
+    (totals, usage) => ({
+      promptTokens: totals.promptTokens + Number(usage.promptTokens),
+      completionTokens:
+        totals.completionTokens + Number(usage.completionTokens),
+      totalTokens: totals.totalTokens + Number(usage.totalTokens),
+    }),
+    { promptTokens: 0, completionTokens: 0, totalTokens: 0 },
+  );
   const totalSteps = plans.reduce((total, message) => total + (message.planner.todo || []).length, 0);
   return {
     generatedAt: new Date().toISOString(),
@@ -59,9 +93,32 @@ function evaluateAgentMessages(messages) {
       humanInterventionRequiredRate: ratio(interventionRequired.length, plans.length),
       averageSteps: plans.length ? Number((totalSteps / plans.length).toFixed(2)) : null,
       averageEndToEndMs: durations.length ? Math.round(durations.reduce((sum, value) => sum + value, 0) / durations.length) : null,
+      latencyMs: {
+        planning: {
+          samples: planningDurations.length,
+          average: average(planningDurations),
+          p50: percentile(planningDurations, 50),
+          p95: percentile(planningDurations, 95),
+          p99: percentile(planningDurations, 99),
+        },
+        endToEnd: {
+          samples: durations.length,
+          average: average(durations),
+          p50: percentile(durations, 50),
+          p95: percentile(durations, 95),
+          p99: percentile(durations, 99),
+        },
+      },
+      tokenUsage: {
+        sampledPlans: usageSamples.length,
+        ...tokenUsage,
+        averageTotalTokens: usageSamples.length
+          ? Math.round(tokenUsage.totalTokens / usageSamples.length)
+          : null,
+      },
       errorTypes,
     },
   };
 }
 
-module.exports = { evaluateAgentMessages, classifyError };
+module.exports = { evaluateAgentMessages, classifyError, percentile };

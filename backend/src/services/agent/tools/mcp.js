@@ -56,6 +56,7 @@ const actionHandlers = {
       route.server,
       route.tool,
       toOpenMeteoForecastArguments(action.arguments),
+      { retryable: true },
     );
     return {
       summary: "外部天气信息查询完成",

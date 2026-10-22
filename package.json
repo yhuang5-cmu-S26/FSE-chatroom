@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "@langchain/langgraph-checkpoint-mongodb": "^1.4.1"
+  }
+}

@@ -14,6 +14,7 @@ const WorkflowRun = require("../../src/models/WorkflowRun");
 const { createRun } = require("../../src/services/workflow/state");
 const {
   executeApprovedAgentWorkflow,
+  resumeAgentWorkflow,
 } = require("../../src/services/agent/workflow");
 
 test.after(() => fs.rmSync(dataDir, { recursive: true, force: true }));
@@ -104,15 +105,25 @@ test("weather alert proposal pauses for a second approval before publishing", as
   message.planner.approvalStatus = "approved";
   run.state = "running";
   await run.save();
-  await executeApprovedAgentWorkflow({
+  const paused = await executeApprovedAgentWorkflow({
     message,
     run,
     actor: { id: "user-1", role: "admin" },
     actionExecutor,
   });
 
+  assert.equal(paused.interrupt.value.kind, "tool_approval");
+  assert.equal(paused.interrupt.value.actionType, "post.publish");
+  const resumed = await resumeAgentWorkflow({
+    message: await AgentMessage.findById(message.id),
+    run: await WorkflowRun.findById(run.id),
+    actor: { id: "user-1", role: "admin" },
+    response: { decision: "approve" },
+    interruptId: paused.interrupt.id,
+    actionExecutor,
+  });
+
   assert.deepEqual(calls, ["mcp.weather.forecast", "post.publish"]);
-  assert.equal(message.planner.approvalStatus, "executed");
-  assert.equal(run.state, "succeeded");
+  assert.equal(resumed.message.planner.approvalStatus, "executed");
   assert.equal((await WorkflowRun.findById(run.id)).state, "succeeded");
 });

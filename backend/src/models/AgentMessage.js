@@ -55,6 +55,7 @@ const agentMessageSchema = new mongoose.Schema(
           "not_required",
           "pending",
           "approved",
+          "awaiting_input",
           "executed",
           "failed",
           "rejected",
@@ -64,9 +65,15 @@ const agentMessageSchema = new mongoose.Schema(
       },
       requestedAt: Date,
       planningLatencyMs: Number,
+      usage: {
+        promptTokens: { type: Number, min: 0 },
+        completionTokens: { type: Number, min: 0 },
+        totalTokens: { type: Number, min: 0 },
+      },
       handoff: { requestedAt: Date, reason: { type: String, maxlength: 500 } },
       execution: {
         status: String,
+        interrupt: mongoose.Schema.Types.Mixed,
         steps: [
           {
             id: String,

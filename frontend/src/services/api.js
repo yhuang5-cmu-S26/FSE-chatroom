@@ -86,6 +86,13 @@ export const api = {
     request(`/agent/sessions/${sessionId}`, { method: "DELETE" }),
   agentSessionMessages: (sessionId) =>
     request(`/agent/sessions/${sessionId}/messages`),
+  agentMonitor: (sessionId) =>
+    request(`/agent/sessions/${sessionId}/monitor`),
+  runAgentTests: (cases) =>
+    request("/agent/monitor/tests", {
+      method: "POST",
+      body: JSON.stringify({ cases }),
+    }),
   approveAgentPlan: (sessionId, messageId) =>
     request(`/agent/sessions/${sessionId}/approve`, {
       method: "POST",
@@ -99,5 +106,10 @@ export const api = {
   retryAgentRun: (sessionId, runId) =>
     request(`/agent/sessions/${sessionId}/runs/${runId}/retry`, {
       method: "POST",
+    }),
+  resumeAgentRun: (sessionId, runId, body) =>
+    request(`/agent/sessions/${sessionId}/runs/${runId}/resume`, {
+      method: "POST",
+      body: JSON.stringify(body),
     }),
 };

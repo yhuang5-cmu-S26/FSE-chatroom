@@ -132,3 +132,5 @@ Agent 使用 `AgentSession`（会话元数据）和 `AgentMessage`（独立消�
 - `GET /api/agent/sessions`：当前用户的会话列表
 - `GET /api/agent/sessions/:sessionId/messages`：当前用户的历史消息
 - `POST /api/agent/chat`：创建/续写会话，服务端读取最近历史后调用 Planner
+- `POST /api/agent/sessions/:sessionId/approve`：批准计划并启动执行 Graph
+- `POST /api/agent/sessions/:sessionId/runs/:runId/resume`：回复 LangGraph interrupt，并从 checkpoint 恢复执行

@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { buildPromptContext } = require('../../src/services/historyCompressor');
+const {
+  buildPromptContext,
+} = require('../../src/services/agent/memory/compressor');
 
 const history = [
   { role: 'user', content: '灾害响应编号 DR-2026-09，集合点改为北门，并通知第 3 组。' },

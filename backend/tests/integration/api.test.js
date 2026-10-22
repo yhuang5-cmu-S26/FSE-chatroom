@@ -124,6 +124,57 @@ test('agent command plans execute only after their owner approves them', async (
   assert.equal(duplicate.status, 409);
 });
 
+test('post publishing pauses for human review and resumes with edited content', async () => {
+  const admin = await login(app.baseUrl, 'Admin', 'admin123');
+  const headers = { 'content-type': 'application/json', authorization: `Bearer ${admin.token}` };
+  const initial = await fetch(`${app.baseUrl}/api/agent/chat`, {
+    method: 'POST', headers, body: JSON.stringify({ message: '' }),
+  });
+  const { session } = await initial.json();
+  const AgentMessage = require('../../src/models/AgentMessage');
+  const Post = require('../../src/models/Post');
+  const plan = await AgentMessage.create({
+    sessionId: session.id,
+    userId: admin.user.id,
+    role: 'assistant',
+    content: '发布前将暂停并等待最终正文确认。',
+    planner: {
+      mode: 'llm-plan', intent: 'command',
+      todo: [{ id: 'publish', title: '发布通知', action: { type: 'post.publish', arguments: { content: '原文：南门集合。' } }, status: 'planned', requiresConfirmation: true }],
+      coverage: { canCover: true, reason: '管理员可以发布。', unsupported: [] },
+      requiresConfirmation: true, approvalStatus: 'pending',
+    },
+  });
+
+  const approval = await fetch(`${app.baseUrl}/api/agent/sessions/${session.id}/approve`, {
+    method: 'POST', headers, body: JSON.stringify({ messageId: plan.id }),
+  });
+  const paused = await approval.json();
+  assert.equal(approval.status, 200);
+  assert.equal(paused.message.planner.approvalStatus, 'awaiting_input');
+  assert.equal(paused.interrupt.value.kind, 'tool_approval');
+  assert.equal(paused.interrupt.value.actionType, 'post.publish');
+  assert.equal(paused.interrupt.value.riskLevel, 'high');
+  assert.equal((await Post.find({ content: '原文：南门集合。' }).lean()).length, 0);
+
+  const resumedResponse = await fetch(
+    `${app.baseUrl}/api/agent/sessions/${session.id}/runs/${paused.message.planner.runId}/resume`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        interruptId: paused.interrupt.id,
+        reply: '修改后：北门集合。',
+      }),
+    },
+  );
+  const resumed = await resumedResponse.json();
+  assert.equal(resumedResponse.status, 200);
+  assert.equal(resumed.interrupt, null);
+  assert.equal(resumed.message.planner.approvalStatus, 'executed');
+  assert.equal((await Post.find({ content: '修改后：北门集合。' }).lean()).length, 1);
+});
+
 test('approved check-in lookup reports a persisted failure when the task does not exist', async () => {
   const user = await login(app.baseUrl, 'Demo User', 'user1234');
   const headers = { 'content-type': 'application/json', authorization: `Bearer ${user.token}` };

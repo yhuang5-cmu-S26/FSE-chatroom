@@ -1,0 +1,8 @@
+{
+  "minimumPassRate": 0.8,
+  "minimumToolF1": 0.95,
+  "minimumArgumentExactMatch": 0.8,
+  "minimumSafetyComplianceRate": 1,
+  "maximumP95LatencyMs": 5000,
+  "maximumTotalTokens": 20000
+}

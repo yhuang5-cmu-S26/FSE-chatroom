@@ -26,6 +26,7 @@ const schema = new mongoose.Schema(
       type: String,
       enum: [
         "awaiting_approval",
+        "awaiting_input",
         "running",
         "succeeded",
         "failed",

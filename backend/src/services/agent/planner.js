@@ -55,17 +55,29 @@ function parseModelJson(content) {
 }
 
 /** Creates the OpenAI-compatible request body for the Agent planning feature. */
-function modelRequestBody(config, actor, history, input, stream = false) {
+function modelRequestBody(
+  config,
+  actor,
+  history,
+  input,
+  stream = false,
+  systemMemory = "",
+) {
   const body = {
     model: process.env.LLM_MODEL,
     temperature: 0.1,
     stream,
     messages: [
       { role: "system", content: buildSystemPrompt(config, actor) },
+      ...(systemMemory
+        ? [{ role: "system", content: String(systemMemory).slice(0, 8000) }]
+        : []),
       ...sanitizeHistory(history),
       { role: "user", content: input },
     ],
   };
+  if (stream && process.env.LLM_STREAM_INCLUDE_USAGE === "true")
+    body.stream_options = { include_usage: true };
   if (process.env.LLM_STRUCTURED_OUTPUTS === "true")
     body.response_format = {
       type: "json_schema",
@@ -76,6 +88,24 @@ function modelRequestBody(config, actor, history, input, stream = false) {
       },
     };
   return body;
+}
+
+/** Normalizes token counters returned by OpenAI-compatible providers. */
+function normalizeUsage(usage) {
+  if (!usage || typeof usage !== "object") return null;
+  const promptTokens = Number(usage.prompt_tokens ?? usage.input_tokens);
+  const completionTokens = Number(
+    usage.completion_tokens ?? usage.output_tokens,
+  );
+  const totalTokens = Number(
+    usage.total_tokens ??
+      (Number.isFinite(promptTokens) && Number.isFinite(completionTokens)
+        ? promptTokens + completionTokens
+        : NaN),
+  );
+  if (![promptTokens, completionTokens, totalTokens].every(Number.isFinite))
+    return null;
+  return { promptTokens, completionTokens, totalTokens };
 }
 
 /** Extracts the completed reply prefix from streamed plan JSON for the SSE chat feature. */
@@ -206,7 +236,7 @@ function sanitizeHistory(history) {
 async function planAgentRequest(
   message,
   actor,
-  { fetchImpl = fetch, history = [] } = {},
+  { fetchImpl = fetch, history = [], systemMemory = "" } = {},
 ) {
   const input =
     typeof message === "string" ? message.trim().slice(0, 2000) : "";
@@ -235,7 +265,14 @@ async function planAgentRequest(
     Number(process.env.LLM_TIMEOUT_MS) || 15000,
   );
   try {
-    const body = modelRequestBody(config, actor, history, input);
+    const body = modelRequestBody(
+      config,
+      actor,
+      history,
+      input,
+      false,
+      systemMemory,
+    );
     console.log("Agent LLM request assembly has been finished.");
     const response = await fetchImpl(url, {
       method: "POST",
@@ -248,11 +285,14 @@ async function planAgentRequest(
     });
     if (!response.ok) throw new Error(`LLM API returned ${response.status}`);
     const payload = await response.json();
-    return validatePlan(
-      parseModelJson(payload?.choices?.[0]?.message?.content),
-      actor,
-      config,
-    );
+    return {
+      ...validatePlan(
+        parseModelJson(payload?.choices?.[0]?.message?.content),
+        actor,
+        config,
+      ),
+      usage: normalizeUsage(payload?.usage),
+    };
   } finally {
     clearTimeout(timeout);
   }
@@ -265,7 +305,12 @@ async function planAgentRequest(
 async function planAgentRequestStream(
   message,
   actor,
-  { fetchImpl = fetch, history = [], onDelta = () => {} } = {},
+  {
+    fetchImpl = fetch,
+    history = [],
+    systemMemory = "",
+    onDelta = () => {},
+  } = {},
 ) {
   const input =
     typeof message === "string" ? message.trim().slice(0, 2000) : "";
@@ -274,9 +319,20 @@ async function planAgentRequestStream(
   const apiKey = process.env.LLM_API_KEY;
   const model = process.env.LLM_MODEL;
   if (!url || !apiKey || !model)
-    return planAgentRequest(input, actor, { fetchImpl, history });
+    return planAgentRequest(input, actor, {
+      fetchImpl,
+      history,
+      systemMemory,
+    });
   const config = await getAgentPrompts();
-  const body = modelRequestBody(config, actor, history, input, true);
+  const body = modelRequestBody(
+    config,
+    actor,
+    history,
+    input,
+    true,
+    systemMemory,
+  );
   console.log("Agent LLM request assembly has been finished.");
   const response = await fetchImpl(url, {
     method: "POST",
@@ -293,6 +349,7 @@ async function planAgentRequestStream(
   let buffer = "";
   let content = "";
   let emitted = "";
+  let usage = null;
   while (true) {
     const { value, done } = await reader.read();
     buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
@@ -302,7 +359,9 @@ async function planAgentRequestStream(
       if (!line.startsWith("data:")) continue;
       const payload = line.slice(5).trim();
       if (!payload || payload === "[DONE]") continue;
-      const delta = JSON.parse(payload)?.choices?.[0]?.delta?.content || "";
+      const event = JSON.parse(payload);
+      usage = normalizeUsage(event?.usage) || usage;
+      const delta = event?.choices?.[0]?.delta?.content || "";
       content += delta;
       const reply = replyFromPartialJson(content);
       if (reply.length > emitted.length) {
@@ -312,7 +371,10 @@ async function planAgentRequestStream(
     }
     if (done) break;
   }
-  return validatePlan(parseModelJson(content), actor, config);
+  return {
+    ...validatePlan(parseModelJson(content), actor, config),
+    usage,
+  };
 }
 
 /**
@@ -320,13 +382,9 @@ async function planAgentRequestStream(
  * Feature: safe execution boundary for Agent workflows.
  */
 async function executeAgentAction(action, actor, context = {}) {
-  const { capabilityByAction } = await getAgentPrompts();
-  const capability = capabilityByAction.get(action?.type);
-  if (!capability) throw new Error(`unknown action: ${action?.type}`);
-  if (!capability.validateArguments(action.arguments))
-    throw new Error(`invalid action arguments: ${action.type}`);
-  if (capability.requiredRole && capability.requiredRole !== actor?.role)
-    throw new Error(`forbidden action: ${action.type}`);
+  // The executor is a second policy enforcement point. Graph approval UX is
+  // never treated as authorization by itself.
+  await require("./toolPolicy").authorizeToolExecution(action, actor, context);
   return getActionRoute(action.type)
     ? require("./tools/mcp").executeActions(action, actor, context)
     : require("./tools/local").execute(action, actor, context);
@@ -337,4 +395,5 @@ module.exports = {
   planAgentRequest,
   planAgentRequestStream,
   executeAgentAction,
+  normalizeUsage,
 };

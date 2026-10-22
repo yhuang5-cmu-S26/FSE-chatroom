@@ -1,6 +1,9 @@
 const AgentSession = require("../../models/AgentSession");
 const AgentMessage = require("../../models/AgentMessage");
-const { buildPromptContext } = require("../historyCompressor");
+const {
+  deleteSessionMemory,
+  prepareMemoryContext,
+} = require("./memory");
 const { deleteWorkflowStateForSession } = require("../workflow/state");
 
 const SESSION_LIMIT = 50;
@@ -88,10 +91,10 @@ async function listMessages(sessionId, userId, limit = 100) {
   const session = await getOwnedSession(sessionId, userId);
   if (!session) return null;
   const messages = await AgentMessage.find({ sessionId, userId })
-    .sort({ createdAt: 1 })
+    .sort({ createdAt: -1 })
     .limit(Math.min(Math.max(Number(limit) || 100, 1), 100))
     .lean();
-  return messages.map(serializeMessage);
+  return messages.reverse().map(serializeMessage);
 }
 /** Deletes an idle session and its dependent workflow audit data. Feature: Agent session cleanup. */
 async function deleteSession(sessionId, userId) {
@@ -102,28 +105,15 @@ async function deleteSession(sessionId, userId) {
     throw error;
   }
   await deleteWorkflowStateForSession(session.id, userId);
+  await deleteSessionMemory(session.id, userId);
   await AgentMessage.deleteMany({ sessionId: session.id, userId });
   await AgentSession.findByIdAndDelete(session.id);
 }
-/** Builds and persists compressed prompt memory for context-window-safe Agent planning. */
+/** @deprecated Use services/agent/memory.prepareMemoryContext directly. */
 async function promptHistory(sessionId, userId) {
   const session = await getOwnedSession(sessionId, userId);
   if (!session) return [];
-  const messages = await AgentMessage.find({ sessionId, userId })
-    .sort({ createdAt: 1 })
-    .lean();
-  const context = buildPromptContext(messages);
-  const previous = session.contextMemory || {};
-  if (
-    previous.summary !== context.memory.summary ||
-    previous.sourceMessageCount !== context.memory.sourceMessageCount
-  ) {
-    session.contextMemory = context.memory;
-    if (typeof session.markModified === "function")
-      session.markModified("contextMemory");
-    await session.save();
-  }
-  return context.history;
+  return (await prepareMemoryContext(session, userId, "")).history;
 }
 
 module.exports = {

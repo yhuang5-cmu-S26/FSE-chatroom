@@ -17,3 +17,5 @@ backend/.env
 
 # logs
 *.log
+
+node_modules/

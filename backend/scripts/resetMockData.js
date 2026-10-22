@@ -42,8 +42,14 @@ const collections = {
     "checkins.json": [],
     "speed-tests.json": [],
   },
-  "llm-session": { "sessions.json": [], "messages.json": [] },
+  "llm-session": {
+    "sessions.json": [],
+    "messages.json": [],
+    "agent-memories.json": [],
+    "memory-checkpoints.json": { version: 2, storage: {}, writes: {} },
+  },
   "workflow-data": {
+    "workflow-checkpoints.json": { version: 2, storage: {}, writes: {} },
     "workflow-runs.json": [],
     "workflow-steps.json": [],
     "tool-calls.json": [],

@@ -24,6 +24,12 @@ async function startTestServer() {
   process.env.AGENT_SESSION_DATA_DIR = process.env.LLM_SESSION_DATA_DIR;
   process.env.WORKFLOW_DATA_DIR = path.join(process.env.JSON_DATA_DIR, 'workflow-data');
   process.env.JWT_SECRET = 'test-secret-at-least-32-characters';
+  // Integration tests must not inherit developer credentials from backend/.env
+  // and accidentally depend on a live model provider. Planner protocol/provider
+  // behaviour is covered by injected fetch doubles in the unit test suite.
+  process.env.LLM_API_URL = '';
+  process.env.LLM_API_KEY = '';
+  process.env.LLM_MODEL = '';
   const { startServer } = require('../../src/server');
   const instance = await startServer({ port: 0, host: '127.0.0.1' });
   const baseUrl = `http://127.0.0.1:${instance.server.address().port}`;

@@ -6,6 +6,8 @@ All commands below run from `backend/`. Integration tests temporarily bind a loc
 | --- | --- | --- |
 | `npm test` | integration + unit | Authentication, RBAC, sockets, Agent contracts, approval and execution |
 | `npm run test:context` | context | Context compression ratio and deterministic factual-answer parity |
+| `npm run test:agent-eval` | agent evaluation | Deterministic planner metrics and persisted tool-trace audit invariants |
+| `npm run eval:agent` | live agent evaluation | Fixed, budget-capped real-model planner benchmark; see `agent-evaluation/` |
 | `npm run test:performance` | performance | Benchmark baseline and current service paths |
 | `npm run verify` | verification | Produce the verification report under `tests/reports/` |
 
